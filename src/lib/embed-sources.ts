@@ -4,8 +4,7 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
 
-// ── AniList-ID based embeds (always available) ─────────────────────────────
-// These work with just the AniList ID — no IMDb needed
+// ── AniList-ID based embeds ────────────────────────────────────────────────
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -15,21 +14,27 @@ export function getAnilistEmbedSources(
   const ep = isMovie ? 1 : episode;
   return [
     {
-      // VidPlus: purpose-built anime embed, accepts AniList ID natively
+      // AnimeKai - large library, AniList sync, current seasonal anime
       type: "embed",
-      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?autoplay=true&autonext=false`,
-      provider: "VidPlus",
+      url: `https://anikai.to/watch/${anilistId}?ep=${ep}`,
+      provider: "AnimeKai",
     },
     {
-      // VidPlus dub fallback
+      // AnimePahe direct watch link
       type: "embed",
-      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?dub=true&autoplay=true`,
-      provider: "VidPlus (Dub)",
+      url: `https://animepahe.ru/a/${anilistId}`,
+      provider: "AnimePahe",
+    },
+    {
+      // AllAnime - reliable, has most seasonal titles
+      type: "embed",
+      url: `https://allanime.to/anime/${anilistId}/episode-${ep}`,
+      provider: "AllAnime",
     },
   ];
 }
 
-// ── IMDb/TMDB based embeds (only when imdbId is available) ─────────────────
+// ── IMDb/TMDB based embeds ─────────────────────────────────────────────────
 
 export function getEmbedSources(
   imdbId: string | null,
@@ -45,19 +50,11 @@ export function getEmbedSources(
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc 1" });
       sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`, provider: "VidSrc CC" });
       sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/movie/${imdbId}`, provider: "VidSrc 2" });
-      sources.push({ type: "embed", url: `https://www.2embed.cc/embed/${imdbId}`, provider: "2Embed" });
-      sources.push({ type: "embed", url: `https://player.smashy.stream/movie/${imdbId}`, provider: "SmashyStream" });
     } else {
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 1" });
       sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc CC" });
       sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 2" });
-      sources.push({ type: "embed", url: `https://www.2embed.cc/embedtv/${imdbId}&s=${season}&e=${episode}`, provider: "2Embed" });
-      sources.push({ type: "embed", url: `https://player.smashy.stream/tv/${imdbId}?s=${season}&e=${episode}`, provider: "SmashyStream" });
     }
-  }
-
-  if (tmdbId && !isMovie) {
-    sources.push({ type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink" });
   }
 
   return sources;
