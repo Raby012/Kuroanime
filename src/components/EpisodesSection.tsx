@@ -71,14 +71,15 @@ export function EpisodesSection({
   return (
     <div>
       {/* Video Player */}
-      <VideoPlayer
-        animeTitle={animeTitle}
-        episode={episode}
-        imdbId={imdbId}
-        isMovie={isMovie}
-        onEpisodeEnd={handleEpisodeEnd}
-        onProgress={handleProgress}
-      />
+<VideoPlayer
+  animeTitle={animeTitle}
+  anilistId={anilistId}   {/* ← add this line */}
+  episode={episode}
+  imdbId={imdbId}
+  isMovie={isMovie}
+  onEpisodeEnd={handleEpisodeEnd}
+  onProgress={handleProgress}
+/>
 
       {/* Episode List */}
       {!isMovie && totalEpisodes > 0 && (
