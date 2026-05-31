@@ -2,7 +2,8 @@
 // 1. GogoAnime via consumet.ts (real m3u8)
 // 2. AnimePahe via consumet.ts (real m3u8)
 // 3. VidSrc embed providers (iframe fallback)
-
+import type { StreamSource } from "@/lib/embed-sources";
+export type { StreamSource };
 export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
