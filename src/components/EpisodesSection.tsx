@@ -12,6 +12,7 @@ interface EpisodesSectionProps {
   totalEpisodes: number;
   isMovie: boolean;
   imdbId?: string | null;
+  seasonYear?: number | null;
 }
 
 export function EpisodesSection({
@@ -20,6 +21,7 @@ export function EpisodesSection({
   totalEpisodes,
   isMovie,
   imdbId,
+  seasonYear,
 }: EpisodesSectionProps) {
   const [episode, setEpisode] = useState(1);
   const [page, setPage] = useState(0);
@@ -65,7 +67,10 @@ export function EpisodesSection({
   const totalPages = Math.ceil(totalEpisodes / EPISODES_PER_PAGE);
   const startEp = page * EPISODES_PER_PAGE + 1;
   const endEp = Math.min((page + 1) * EPISODES_PER_PAGE, totalEpisodes);
-  const pageEpisodes = Array.from({ length: endEp - startEp + 1 }, (_, i) => startEp + i);
+  const pageEpisodes = Array.from(
+    { length: endEp - startEp + 1 },
+    (_, i) => startEp + i
+  );
 
   return (
     <div>
@@ -76,6 +81,7 @@ export function EpisodesSection({
         episode={episode}
         imdbId={imdbId}
         isMovie={isMovie}
+        seasonYear={seasonYear}
         onEpisodeEnd={handleEpisodeEnd}
         onProgress={handleProgress}
       />
@@ -110,11 +116,14 @@ export function EpisodesSection({
                         : "bg-surface-2 text-gray-400 hover:text-white"
                     }`}
                   >
-                    {i * EPISODES_PER_PAGE + 1}–{Math.min((i + 1) * EPISODES_PER_PAGE, totalEpisodes)}
+                    {i * EPISODES_PER_PAGE + 1}–
+                    {Math.min((i + 1) * EPISODES_PER_PAGE, totalEpisodes)}
                   </button>
                 ))}
                 <button
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  onClick={() =>
+                    setPage((p) => Math.min(totalPages - 1, p + 1))
+                  }
                   disabled={page === totalPages - 1}
                   className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
                 >
@@ -124,6 +133,7 @@ export function EpisodesSection({
             )}
           </div>
 
+          {/* Episode grid */}
           <div className="grid grid-cols-[repeat(auto-fill,minmax(44px,1fr))] gap-2">
             {pageEpisodes.map((ep) => (
               <button
@@ -138,12 +148,14 @@ export function EpisodesSection({
             ))}
           </div>
 
+          {/* Legend */}
           <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded bg-brand inline-block" /> Current
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-[#1a3020] inline-block" /> Watched
+              <span className="w-3 h-3 rounded bg-[#1a3020] inline-block" />{" "}
+              Watched
             </span>
           </div>
         </div>
