@@ -2,9 +2,20 @@
 const nextConfig = {
   serverExternalPackages: [
     "@consumet/extensions",
-    "got-scraping-wrapper",
+    "got-scraping-wrapper", 
     "got-scraping",
   ],
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        "@consumet/extensions": false,
+        "got-scraping-wrapper": false,
+        "got-scraping": false,
+      };
+    }
+    return config;
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "s4.anilist.co" },
