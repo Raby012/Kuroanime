@@ -32,8 +32,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
 
   const isMovie = anime.format === "MOVIE";
 
-  // Fix episode count for ongoing anime:
-  // nextAiringEpisode.episode is the NEXT episode to air, so -1 = last aired
+  // Correct episode count for ongoing anime
   const totalEpisodes = (() => {
     if (isMovie) return 1;
     if (anime.status === "RELEASING" && anime.nextAiringEpisode?.episode) {
@@ -199,6 +198,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
             totalEpisodes={totalEpisodes}
             isMovie={isMovie}
             imdbId={imdbId}
+            seasonYear={anime.seasonYear}
           />
         </div>
 
