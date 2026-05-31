@@ -13,6 +13,7 @@ const MEDIA_FIELDS = `
   tags { name rank isMediaSpoiler }
   externalLinks { site url }
   trailer { id site }
+  nextAiringEpisode { episode airingAt }
   characters(sort: ROLE, role: MAIN, perPage: 8) {
     edges { role node { id name { full } image { medium } } }
   }
@@ -129,63 +130,6 @@ export async function getAnimeByMalId(malId: number) {
   return data.Media;
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export interface AnilistMedia {
-  id: number;
-  idMal: number | null;
-  title: { romaji: string; english: string | null; native: string; userPreferred: string };
-  description: string | null;
-  coverImage: { extraLarge: string; large: string; medium: string; color: string | null };
-  bannerImage: string | null;
-  format: string | null;
-  status: string | null;
-  episodes: number | null;
-  duration: number | null;
-  season: string | null;
-  seasonYear: number | null;
-  startDate: { year: number | null; month: number | null; day: number | null };
-  genres: string[];
-  averageScore: number | null;
-  popularity: number | null;
-  trending: number | null;
-  studios: { nodes: { name: string }[] };
-  tags: { name: string; rank: number; isMediaSpoiler: boolean }[];
-  externalLinks: { site: string; url: string }[];
-  trailer: { id: string; site: string } | null;
-  characters: {
-    edges: {
-      role: string;
-      node: { id: number; name: { full: string }; image: { medium: string } };
-    }[];
-  };
-  relations: {
-    edges: {
-      relationType: string;
-      node: { id: number; title: { userPreferred: string }; coverImage: { large: string }; format: string | null };
-    }[];
-  };
-  recommendations?: {
-    nodes: {
-      mediaRecommendation: {
-        id: number;
-        title: { userPreferred: string };
-        coverImage: { large: string };
-        format: string | null;
-      } | null;
-    }[];
-  };
-}
-
-interface PageInfo {
-  total: number;
-  currentPage: number;
-  lastPage: number;
-  hasNextPage: boolean;
-}
-
-// ── Additional queries ────────────────────────────────────────────────────
-
 export async function getTopAnime(page = 1, perPage = 50) {
   const q = `
     query ($page: Int, $perPage: Int) {
@@ -244,6 +188,60 @@ export const ALL_GENRES = [
   "Supernatural","Thriller","Isekai","Harem",
 ];
 
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface AnilistMedia {
+  id: number;
+  idMal: number | null;
+  title: { romaji: string; english: string | null; native: string; userPreferred: string };
+  description: string | null;
+  coverImage: { extraLarge: string; large: string; medium: string; color: string | null };
+  bannerImage: string | null;
+  format: string | null;
+  status: string | null;
+  episodes: number | null;
+  duration: number | null;
+  season: string | null;
+  seasonYear: number | null;
+  startDate: { year: number | null; month: number | null; day: number | null };
+  genres: string[];
+  averageScore: number | null;
+  popularity: number | null;
+  trending: number | null;
+  studios: { nodes: { name: string }[] };
+  tags: { name: string; rank: number; isMediaSpoiler: boolean }[];
+  externalLinks: { site: string; url: string }[];
+  trailer: { id: string; site: string } | null;
+  nextAiringEpisode: { episode: number; airingAt: number } | null;
+  characters: {
+    edges: {
+      role: string;
+      node: { id: number; name: { full: string }; image: { medium: string } };
+    }[];
+  };
+  relations: {
+    edges: {
+      relationType: string;
+      node: {
+        id: number;
+        title: { userPreferred: string };
+        coverImage: { large: string };
+        format: string | null;
+      };
+    }[];
+  };
+  recommendations?: {
+    nodes: {
+      mediaRecommendation: {
+        id: number;
+        title: { userPreferred: string };
+        coverImage: { large: string };
+        format: string | null;
+      } | null;
+    }[];
+  };
+}
+
 export interface AiringSchedule {
   airingAt: number;
   episode: number;
@@ -254,4 +252,11 @@ export interface AiringSchedule {
     format: string | null;
     episodes: number | null;
   };
+}
+
+interface PageInfo {
+  total: number;
+  currentPage: number;
+  lastPage: number;
+  hasNextPage: boolean;
 }
