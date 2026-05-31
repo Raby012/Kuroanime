@@ -4,37 +4,44 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
 
-// ── VidSrc Embed Providers (TMDB/IMDB based, most stable) ─────────────────
+// ── AniList-ID based embeds (always available, most reliable) ──────────────
 
-
-  // In embed-sources.ts, add this function:
 export function getAnilistEmbedSources(
   anilistId: number,
   episode: number,
   isMovie: boolean
 ): StreamSource[] {
+  const ep = isMovie ? 1 : episode;
+  return [
+    {
+      type: "embed",
+      url: `https://2anime.xyz/embed/${anilistId}/${ep}`,
+      provider: "2Anime",
+    },
+    {
+      type: "embed",
+      url: `https://anify.tv/embed?id=${anilistId}&number=${ep}&audio=sub`,
+      provider: "Anify",
+    },
+    {
+      type: "embed",
+      url: `https://miruro.tv/watch?id=${anilistId}&ep=${ep}`,
+      provider: "Miruro",
+    },
+  ];
+}
+
+// ── IMDb/TMDB based embeds (only when imdbId is available) ─────────────────
+
+export function getEmbedSources(
+  imdbId: string | null,
+  tmdbId: number | null,
+  season: number,
+  episode: number,
+  isMovie: boolean
+): StreamSource[] {
   const sources: StreamSource[] = [];
 
-  if (!isMovie) {
-    sources.push({
-      type: "embed",
-      url: `https://2anime.xyz/embed/${anilistId}/${episode}`,
-      provider: "2Anime",
-    });
-    sources.push({
-      type: "embed",
-      url: `https://www.animekai.to/player?al=${anilistId}&ep=${episode}`,
-      provider: "AnimeKai",
-    });
-    sources.push({
-      type: "embed",
-      url: `https://player.animepahe.ru/anime/${anilistId}/${episode}`,
-      provider: "PaheEmbed",
-    });
-  }
-
-  return sources;
-}
   if (imdbId) {
     if (isMovie) {
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc 1" });
