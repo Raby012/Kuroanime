@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
-import { getEmbedSources, getAnilistEmbedSources } from "@/lib/embed-sources";
+import { getEmbedSources } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
 interface VideoPlayerProps {
@@ -9,6 +9,7 @@ interface VideoPlayerProps {
   anilistId: number;
   episode: number;
   season?: number;
+  seasonYear?: number | null;
   imdbId?: string | null;
   tmdbId?: number | null;
   isMovie?: boolean;
@@ -21,6 +22,7 @@ export function VideoPlayer({
   anilistId,
   episode,
   season = 1,
+  seasonYear,
   imdbId,
   tmdbId,
   isMovie = false,
@@ -47,7 +49,27 @@ export function VideoPlayer({
 
     const allSources: StreamSource[] = [];
 
-    // 1. Try GogoAnime real m3u8 (best quality)
+    // 1. TMDB-based embeds via title search (most reliable for anime)
+    try {
+      const params = new URLSearchParams({
+        title: animeTitle,
+        episode: String(episode),
+        season: String(season),
+        provider: "tmdb",
+        ...(seasonYear ? { year: String(seasonYear) } : {}),
+      });
+      const res = await fetch(`/api/stream?${params}`);
+      const data = await res.json();
+      if (data.sources?.length) allSources.push(...data.sources);
+    } catch {}
+
+    // 2. IMDb-based embeds (if imdbId available from AniList)
+    if (imdbId) {
+      const embeds = getEmbedSources(imdbId, tmdbId ?? null, season, episode, isMovie);
+      allSources.push(...embeds);
+    }
+
+    // 3. GogoAnime real m3u8
     try {
       const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
@@ -56,7 +78,7 @@ export function VideoPlayer({
       if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
 
-    // 2. Try AnimePahe real m3u8
+    // 4. AnimePahe real m3u8
     try {
       const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
@@ -65,17 +87,12 @@ export function VideoPlayer({
       if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
 
-    // 3. IMDb-based embeds (only if we have imdbId)
-    const embeds = getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie);
-    allSources.push(...embeds);
-
     setSources(allSources);
     setLoading(false);
-  }, [animeTitle, anilistId, episode, season, imdbId, tmdbId, isMovie]);
+  }, [animeTitle, anilistId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Load current source
   useEffect(() => {
     if (!sources.length) return;
     const src = sources[sourceIndex];
@@ -85,31 +102,25 @@ export function VideoPlayer({
     if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
 
-  // Auto-advance embed if it doesn't load within 8 seconds
+  // Auto-advance embed after 8s if not loaded
   useEffect(() => {
     const src = sources[sourceIndex];
     if (!src || src.type !== "embed") return;
-
     if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
     embedTimerRef.current = setTimeout(() => {
       if (!embedLoaded) tryNextSource();
     }, 8000);
-
-    return () => {
-      if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
-    };
+    return () => { if (embedTimerRef.current) clearTimeout(embedTimerRef.current); };
   }, [sourceIndex, sources, embedLoaded]);
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
     if (typeof window === "undefined") return;
     const video = videoRef.current;
     if (!video) return;
-
     if (hlsRef.current) {
       (hlsRef.current as { destroy: () => void }).destroy();
       hlsRef.current = null;
     }
-
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
     } else {
@@ -183,8 +194,7 @@ export function VideoPlayer({
               style={{ border: "none" }}
               onLoad={() => setEmbedLoaded(true)}
             />
-            {/* Skip button for embeds */}
-            {!embedLoaded && sourceIndex < sources.length - 1 && (
+            {sourceIndex < sources.length - 1 && (
               <button
                 onClick={tryNextSource}
                 className="absolute bottom-4 right-4 z-10 flex items-center gap-1 bg-black/70 hover:bg-brand text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
@@ -206,7 +216,6 @@ export function VideoPlayer({
         )}
       </div>
 
-      {/* Source label + switcher */}
       <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
         <span className="text-xs text-gray-500">
           Source: <span className="text-brand">{providerLabel}</span>
