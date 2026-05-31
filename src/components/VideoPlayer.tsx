@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
-import { getEmbedSources } from "@/lib/embed-sources";
+import { getEmbedSources, getAnilistEmbedSources } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
 interface VideoPlayerProps {
   animeTitle: string;
+  anilistId: number;
   episode: number;
   season?: number;
   imdbId?: string | null;
@@ -17,6 +18,7 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({
   animeTitle,
+  anilistId,
   episode,
   season = 1,
   imdbId,
@@ -34,7 +36,6 @@ export function VideoPlayer({
   const [error, setError] = useState(false);
   const [providerLabel, setProviderLabel] = useState("");
 
-  // Fetch real streams from API, then append embed fallbacks
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
@@ -43,31 +44,42 @@ export function VideoPlayer({
 
     const allSources: StreamSource[] = [];
 
-    // 1. Try GogoAnime
+    // 1. AniList-based embeds — always work, put these FIRST as primary sources
+    const anilistEmbeds = getAnilistEmbedSources(anilistId, episode, isMovie);
+    allSources.push(...anilistEmbeds);
+
+    // 2. IMDb/TMDB embeds (if available)
+    const imdbEmbeds = getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie);
+    allSources.push(...imdbEmbeds);
+
+    // 3. Try GogoAnime via API (real m3u8, best quality but often breaks)
     try {
       const gogoRes = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
       );
       const gogoData = await gogoRes.json();
-      if (gogoData.sources?.length) allSources.push(...gogoData.sources);
+      if (gogoData.sources?.length) {
+        // Prepend real streams before embeds for better quality
+        allSources.unshift(...gogoData.sources);
+      }
     } catch {}
 
-    // 2. Try AnimePahe
+    // 4. Try AnimePahe via API
     try {
       const paheRes = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
       );
       const paheData = await paheRes.json();
-      if (paheData.sources?.length) allSources.push(...paheData.sources);
+      if (paheData.sources?.length) {
+        // Insert after gogo but before embeds
+        const m3u8Count = allSources.filter(s => s.type === "m3u8").length;
+        allSources.splice(m3u8Count, 0, ...paheData.sources);
+      }
     } catch {}
-
-    // 3. Embed fallbacks
-    const embeds = getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie);
-    allSources.push(...embeds);
 
     setSources(allSources);
     setLoading(false);
-  }, [animeTitle, episode, season, imdbId, tmdbId, isMovie]);
+  }, [animeTitle, anilistId, episode, season, imdbId, tmdbId, isMovie]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
@@ -76,13 +88,8 @@ export function VideoPlayer({
     if (!sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
-
     setProviderLabel(src.provider);
-
-    if (src.type === "m3u8") {
-      loadHLS(src.url, src.subtitles);
-    }
-    // embed type handled by iframe in JSX
+    if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
@@ -90,14 +97,12 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    // Destroy existing HLS instance
     if (hlsRef.current) {
       (hlsRef.current as { destroy: () => void }).destroy();
       hlsRef.current = null;
     }
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS (Safari)
       video.src = url;
     } else {
       const Hls = (await import("hls.js")).default;
@@ -106,7 +111,9 @@ export function VideoPlayer({
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
-        hls.on(Hls.Events.ERROR, () => tryNextSource());
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) tryNextSource();
+        });
       } else {
         tryNextSource();
       }
