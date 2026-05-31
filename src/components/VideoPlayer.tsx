@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
 import { getEmbedSources, getAnilistEmbedSources } from "@/lib/embed-sources";
-import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
 interface VideoPlayerProps {
   animeTitle: string;
@@ -29,53 +29,45 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<unknown>(null);
+  const embedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [sources, setSources] = useState<StreamSource[]>([]);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [providerLabel, setProviderLabel] = useState("");
+  const [embedLoaded, setEmbedLoaded] = useState(false);
 
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setSources([]);
     setSourceIndex(0);
+    setEmbedLoaded(false);
 
     const allSources: StreamSource[] = [];
 
-    // 1. AniList-based embeds — always work, put these FIRST as primary sources
-    const anilistEmbeds = getAnilistEmbedSources(anilistId, episode, isMovie);
-    allSources.push(...anilistEmbeds);
-
-    // 2. IMDb/TMDB embeds (if available)
-    const imdbEmbeds = getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie);
-    allSources.push(...imdbEmbeds);
-
-    // 3. Try GogoAnime via API (real m3u8, best quality but often breaks)
+    // 1. Try GogoAnime real m3u8 (best quality)
     try {
-      const gogoRes = await fetch(
+      const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
       );
-      const gogoData = await gogoRes.json();
-      if (gogoData.sources?.length) {
-        // Prepend real streams before embeds for better quality
-        allSources.unshift(...gogoData.sources);
-      }
+      const data = await res.json();
+      if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
 
-    // 4. Try AnimePahe via API
+    // 2. Try AnimePahe real m3u8
     try {
-      const paheRes = await fetch(
+      const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
       );
-      const paheData = await paheRes.json();
-      if (paheData.sources?.length) {
-        // Insert after gogo but before embeds
-        const m3u8Count = allSources.filter(s => s.type === "m3u8").length;
-        allSources.splice(m3u8Count, 0, ...paheData.sources);
-      }
+      const data = await res.json();
+      if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
+
+    // 3. IMDb-based embeds (only if we have imdbId)
+    const embeds = getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie);
+    allSources.push(...embeds);
 
     setSources(allSources);
     setLoading(false);
@@ -83,14 +75,30 @@ export function VideoPlayer({
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Load current source into player
+  // Load current source
   useEffect(() => {
     if (!sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
     setProviderLabel(src.provider);
+    setEmbedLoaded(false);
     if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
+
+  // Auto-advance embed if it doesn't load within 8 seconds
+  useEffect(() => {
+    const src = sources[sourceIndex];
+    if (!src || src.type !== "embed") return;
+
+    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    embedTimerRef.current = setTimeout(() => {
+      if (!embedLoaded) tryNextSource();
+    }, 8000);
+
+    return () => {
+      if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    };
+  }, [sourceIndex, sources, embedLoaded]);
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
     if (typeof window === "undefined") return;
@@ -121,6 +129,7 @@ export function VideoPlayer({
   }
 
   function tryNextSource() {
+    setEmbedLoaded(false);
     if (sourceIndex < sources.length - 1) {
       setSourceIndex((i) => i + 1);
     } else {
@@ -140,13 +149,13 @@ export function VideoPlayer({
     );
   }
 
-  if (error || !currentSource) {
+  if (error || (!loading && sources.length === 0)) {
     return (
       <div className="aspect-video bg-surface-1 rounded-xl flex flex-col items-center justify-center gap-4">
         <AlertTriangle className="text-brand" size={32} />
         <p className="text-white font-medium">No streams available</p>
         <p className="text-gray-400 text-sm text-center max-w-xs">
-          All sources exhausted for this episode. Try again later.
+          All sources exhausted. Try again later.
         </p>
         <button
           onClick={fetchSources}
@@ -158,18 +167,32 @@ export function VideoPlayer({
     );
   }
 
+  if (!currentSource) return null;
+
   return (
     <div className="relative">
-      <div className="aspect-video bg-black rounded-xl overflow-hidden">
+      <div className="aspect-video bg-black rounded-xl overflow-hidden relative">
         {isEmbed ? (
-          <iframe
-            key={currentSource.url}
-            src={currentSource.url}
-            className="w-full h-full"
-            allowFullScreen
-            allow="fullscreen; autoplay; encrypted-media"
-            style={{ border: "none" }}
-          />
+          <>
+            <iframe
+              key={currentSource.url}
+              src={currentSource.url}
+              className="w-full h-full"
+              allowFullScreen
+              allow="fullscreen; autoplay; encrypted-media"
+              style={{ border: "none" }}
+              onLoad={() => setEmbedLoaded(true)}
+            />
+            {/* Skip button for embeds */}
+            {!embedLoaded && sourceIndex < sources.length - 1 && (
+              <button
+                onClick={tryNextSource}
+                className="absolute bottom-4 right-4 z-10 flex items-center gap-1 bg-black/70 hover:bg-brand text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Try next source <ChevronRight size={12} />
+              </button>
+            )}
+          </>
         ) : (
           <video
             ref={videoRef}
@@ -183,7 +206,7 @@ export function VideoPlayer({
         )}
       </div>
 
-      {/* Source info + switcher */}
+      {/* Source label + switcher */}
       <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
         <span className="text-xs text-gray-500">
           Source: <span className="text-brand">{providerLabel}</span>
