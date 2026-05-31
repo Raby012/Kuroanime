@@ -4,7 +4,8 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
 
-// ── AniList-ID based embeds (always available, most reliable) ──────────────
+// ── AniList-ID based embeds (always available) ─────────────────────────────
+// These work with just the AniList ID — no IMDb needed
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -14,19 +15,16 @@ export function getAnilistEmbedSources(
   const ep = isMovie ? 1 : episode;
   return [
     {
+      // VidPlus: purpose-built anime embed, accepts AniList ID natively
       type: "embed",
-      url: `https://2anime.xyz/embed/${anilistId}/${ep}`,
-      provider: "2Anime",
+      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?autoplay=true&autonext=false`,
+      provider: "VidPlus",
     },
     {
+      // VidPlus dub fallback
       type: "embed",
-      url: `https://anify.tv/embed?id=${anilistId}&number=${ep}&audio=sub`,
-      provider: "Anify",
-    },
-    {
-      type: "embed",
-      url: `https://miruro.tv/watch?id=${anilistId}&ep=${ep}`,
-      provider: "Miruro",
+      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?dub=true&autoplay=true`,
+      provider: "VidPlus (Dub)",
     },
   ];
 }
