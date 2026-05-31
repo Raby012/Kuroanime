@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  serverExternalPackages: [
+    "@consumet/extensions",
+    "got-scraping-wrapper",
+    "got-scraping",
+  ],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "s4.anilist.co" },
