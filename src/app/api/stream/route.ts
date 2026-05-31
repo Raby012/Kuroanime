@@ -1,3 +1,4 @@
+// src/app/api/stream/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import {
   searchGogoanime,
@@ -6,6 +7,9 @@ import {
   searchAnimePahe,
   getAnimePaheStream,
 } from "@/lib/streaming";
+
+// Force Node.js runtime — required for consumet/got-scraping native modules
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -22,10 +26,10 @@ export async function GET(req: NextRequest) {
       const results = await searchAnimePahe(title);
       if (!results.length) return NextResponse.json({ sources: [] });
 
-      // Try to find best match
-      const match = results.find(
-        (r) => r.title.toLowerCase().includes(title.toLowerCase().split(" ")[0])
-      ) || results[0];
+      const match =
+        results.find((r) =>
+          r.title.toLowerCase().includes(title.toLowerCase().split(" ")[0])
+        ) || results[0];
 
       const episodeId = `${match.id}/${episode}`;
       const sources = await getAnimePaheStream(episodeId);
