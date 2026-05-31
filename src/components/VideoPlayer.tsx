@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
-import { getEmbedSources } from "@/lib/embed-sources";
+import {
+  getEmbedSources,
+  getAnilistEmbedSources,
+  getAutoEmbedSource,
+} from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
 interface VideoPlayerProps {
@@ -49,7 +53,15 @@ export function VideoPlayer({
 
     const allSources: StreamSource[] = [];
 
-    // 1. TMDB-based embeds via title search (most reliable for anime)
+    // 1. MegaPlay — AniList ID direct (best, most reliable for anime)
+    const megaplaySources = getAnilistEmbedSources(anilistId, episode, isMovie);
+    allSources.push(...megaplaySources);
+
+    // 2. AutoEmbed — title slug based
+    const autoEmbeds = getAutoEmbedSource(animeTitle, seasonYear ?? null, episode);
+    allSources.push(...autoEmbeds);
+
+    // 3. TMDB-based embeds via server-side lookup
     try {
       const params = new URLSearchParams({
         title: animeTitle,
@@ -63,13 +75,19 @@ export function VideoPlayer({
       if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
 
-    // 2. IMDb-based embeds (if imdbId available from AniList)
-    if (imdbId) {
-      const embeds = getEmbedSources(imdbId, tmdbId ?? null, season, episode, isMovie);
+    // 4. IMDb/TMDB embeds from AniList external links
+    if (imdbId || tmdbId) {
+      const embeds = getEmbedSources(
+        imdbId ?? null,
+        tmdbId ?? null,
+        season,
+        episode,
+        isMovie
+      );
       allSources.push(...embeds);
     }
 
-    // 3. GogoAnime real m3u8
+    // 5. GogoAnime real m3u8
     try {
       const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
@@ -78,7 +96,7 @@ export function VideoPlayer({
       if (data.sources?.length) allSources.push(...data.sources);
     } catch {}
 
-    // 4. AnimePahe real m3u8
+    // 6. AnimePahe real m3u8
     try {
       const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
@@ -91,29 +109,56 @@ export function VideoPlayer({
     setLoading(false);
   }, [animeTitle, anilistId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
-  useEffect(() => { fetchSources(); }, [fetchSources]);
+  useEffect(() => {
+    fetchSources();
+  }, [fetchSources]);
 
+  // Load current source
   useEffect(() => {
     if (!sources.length) return;
     const src = sources[sourceIndex];
-    if (!src) { setError(true); return; }
+    if (!src) {
+      setError(true);
+      return;
+    }
     setProviderLabel(src.provider);
     setEmbedLoaded(false);
     if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
 
-  // Auto-advance embed after 8s if not loaded
+  // Auto-advance embed after 10s if iframe didn't fire onLoad
   useEffect(() => {
     const src = sources[sourceIndex];
     if (!src || src.type !== "embed") return;
     if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
     embedTimerRef.current = setTimeout(() => {
       if (!embedLoaded) tryNextSource();
-    }, 8000);
-    return () => { if (embedTimerRef.current) clearTimeout(embedTimerRef.current); };
+    }, 10000);
+    return () => {
+      if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    };
   }, [sourceIndex, sources, embedLoaded]);
 
-  async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
+  // Listen for MegaPlay postMessage events
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      try {
+        const data =
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data?.event === "complete") onEpisodeEnd?.();
+        if (data?.event === "time" && data.percent > 0.05) {
+          onProgress?.(episode);
+        }
+      } catch {}
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [episode, onEpisodeEnd, onProgress]);
+
+  async function loadHLS(
+    url: string,
+    subtitles?: { url: string; lang: string }[]
+  ) {
     if (typeof window === "undefined") return;
     const video = videoRef.current;
     if (!video) return;
@@ -155,7 +200,9 @@ export function VideoPlayer({
     return (
       <div className="aspect-video bg-surface-1 rounded-xl flex flex-col items-center justify-center gap-3">
         <Loader2 className="text-brand animate-spin" size={32} />
-        <p className="text-gray-400 text-sm">Finding stream for episode {episode}...</p>
+        <p className="text-gray-400 text-sm">
+          Finding stream for episode {episode}...
+        </p>
       </div>
     );
   }
@@ -216,6 +263,7 @@ export function VideoPlayer({
         )}
       </div>
 
+      {/* Source label + switcher */}
       <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
         <span className="text-xs text-gray-500">
           Source: <span className="text-brand">{providerLabel}</span>
