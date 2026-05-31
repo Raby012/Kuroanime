@@ -1,10 +1,7 @@
-// src/lib/streaming.ts
 import "server-only";
 
 import type { StreamSource } from "@/lib/embed-sources";
 export type { StreamSource };
-
-// ── Types ──────────────────────────────────────────────────────────────────
 
 export interface GogoResult {
   id: string;
@@ -25,19 +22,14 @@ export interface PaheResult {
   image?: string;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-// Safely import consumet — wrapped so TypeScript doesn't analyse the
-// module shape at build time (avoids the "Gogoanime does not exist" error
-// when the installed version has a different provider map).
+// Typed as `any` so TypeScript never statically checks
+// which providers exist — fixes "Gogoanime does not exist" error
 async function getANIME() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mod = await import("@consumet/extensions" as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return mod.ANIME as any;
 }
-
-// ── GogoAnime via Consumet (server-side only) ─────────────────────────────
 
 export async function searchGogoanime(title: string): Promise<GogoResult[]> {
   try {
@@ -89,8 +81,6 @@ export async function getGogoanimeStream(episodeId: string): Promise<StreamSourc
     return [];
   }
 }
-
-// ── AnimePahe via Consumet (server-side only) ─────────────────────────────
 
 export async function searchAnimePahe(title: string): Promise<PaheResult[]> {
   try {
