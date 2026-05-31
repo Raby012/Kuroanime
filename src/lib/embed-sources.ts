@@ -6,15 +6,35 @@ export type StreamSource =
 
 // ── VidSrc Embed Providers (TMDB/IMDB based, most stable) ─────────────────
 
-export function getEmbedSources(
-  imdbId: string | null,
-  tmdbId: number | null,
-  season: number,
+
+  // In embed-sources.ts, add this function:
+export function getAnilistEmbedSources(
+  anilistId: number,
   episode: number,
   isMovie: boolean
 ): StreamSource[] {
   const sources: StreamSource[] = [];
 
+  if (!isMovie) {
+    sources.push({
+      type: "embed",
+      url: `https://2anime.xyz/embed/${anilistId}/${episode}`,
+      provider: "2Anime",
+    });
+    sources.push({
+      type: "embed",
+      url: `https://www.animekai.to/player?al=${anilistId}&ep=${episode}`,
+      provider: "AnimeKai",
+    });
+    sources.push({
+      type: "embed",
+      url: `https://player.animepahe.ru/anime/${anilistId}/${episode}`,
+      provider: "PaheEmbed",
+    });
+  }
+
+  return sources;
+}
   if (imdbId) {
     if (isMovie) {
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc 1" });
