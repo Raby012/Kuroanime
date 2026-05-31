@@ -1,10 +1,7 @@
 // src/lib/streaming.ts
 import "server-only";
 
-// Imports StreamSource from the single source of truth
 import type { StreamSource } from "@/lib/embed-sources";
-
-// Re-export so API route can import from one place if needed
 export type { StreamSource };
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -28,11 +25,23 @@ export interface PaheResult {
   image?: string;
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+// Safely import consumet — wrapped so TypeScript doesn't analyse the
+// module shape at build time (avoids the "Gogoanime does not exist" error
+// when the installed version has a different provider map).
+async function getANIME() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod = await import("@consumet/extensions" as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return mod.ANIME as any;
+}
+
 // ── GogoAnime via Consumet (server-side only) ─────────────────────────────
 
 export async function searchGogoanime(title: string): Promise<GogoResult[]> {
   try {
-    const { ANIME } = await import("@consumet/extensions");
+    const ANIME = await getANIME();
     const gogoanime = new ANIME.Gogoanime();
     const results = await gogoanime.search(title);
     return (results.results || []) as GogoResult[];
@@ -44,7 +53,7 @@ export async function searchGogoanime(title: string): Promise<GogoResult[]> {
 
 export async function getGogoanimeEpisodes(animeId: string): Promise<GogoEpisode[]> {
   try {
-    const { ANIME } = await import("@consumet/extensions");
+    const ANIME = await getANIME();
     const gogoanime = new ANIME.Gogoanime();
     const info = await gogoanime.fetchAnimeInfo(animeId);
     return (info.episodes || []) as GogoEpisode[];
@@ -56,7 +65,7 @@ export async function getGogoanimeEpisodes(animeId: string): Promise<GogoEpisode
 
 export async function getGogoanimeStream(episodeId: string): Promise<StreamSource[]> {
   try {
-    const { ANIME } = await import("@consumet/extensions");
+    const ANIME = await getANIME();
     const gogoanime = new ANIME.Gogoanime();
     const data = await gogoanime.fetchEpisodeSources(episodeId);
     const sources: StreamSource[] = [];
@@ -85,7 +94,7 @@ export async function getGogoanimeStream(episodeId: string): Promise<StreamSourc
 
 export async function searchAnimePahe(title: string): Promise<PaheResult[]> {
   try {
-    const { ANIME } = await import("@consumet/extensions");
+    const ANIME = await getANIME();
     const animepahe = new ANIME.Animepahe();
     const results = await animepahe.search(title);
     return (results.results || []) as PaheResult[];
@@ -97,7 +106,7 @@ export async function searchAnimePahe(title: string): Promise<PaheResult[]> {
 
 export async function getAnimePaheStream(episodeId: string): Promise<StreamSource[]> {
   try {
-    const { ANIME } = await import("@consumet/extensions");
+    const ANIME = await getANIME();
     const animepahe = new ANIME.Animepahe();
     const data = await animepahe.fetchEpisodeSources(episodeId);
     return (data.sources || [])
