@@ -25,7 +25,6 @@ export function EpisodesSection({
   const [page, setPage] = useState(0);
   const [watchedEps, setWatchedEps] = useState<Set<number>>(new Set());
 
-  // Load watch progress on mount
   useEffect(() => {
     fetch(`/api/progress?anilistId=${anilistId}`)
       .then((r) => r.json())
@@ -71,15 +70,15 @@ export function EpisodesSection({
   return (
     <div>
       {/* Video Player */}
-<VideoPlayer
-  animeTitle={animeTitle}
-  anilistId={anilistId}   {/* ← add this line */}
-  episode={episode}
-  imdbId={imdbId}
-  isMovie={isMovie}
-  onEpisodeEnd={handleEpisodeEnd}
-  onProgress={handleProgress}
-/>
+      <VideoPlayer
+        animeTitle={animeTitle}
+        anilistId={anilistId}
+        episode={episode}
+        imdbId={imdbId}
+        isMovie={isMovie}
+        onEpisodeEnd={handleEpisodeEnd}
+        onProgress={handleProgress}
+      />
 
       {/* Episode List */}
       {!isMovie && totalEpisodes > 0 && (
@@ -92,7 +91,6 @@ export function EpisodesSection({
               </p>
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center gap-2">
                 <button
@@ -107,7 +105,9 @@ export function EpisodesSection({
                     key={i}
                     onClick={() => setPage(i)}
                     className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                      page === i ? "bg-brand text-white font-bold" : "bg-surface-2 text-gray-400 hover:text-white"
+                      page === i
+                        ? "bg-brand text-white font-bold"
+                        : "bg-surface-2 text-gray-400 hover:text-white"
                     }`}
                   >
                     {i * EPISODES_PER_PAGE + 1}–{Math.min((i + 1) * EPISODES_PER_PAGE, totalEpisodes)}
@@ -124,7 +124,6 @@ export function EpisodesSection({
             )}
           </div>
 
-          {/* Episode grid */}
           <div className="grid grid-cols-[repeat(auto-fill,minmax(44px,1fr))] gap-2">
             {pageEpisodes.map((ep) => (
               <button
@@ -139,7 +138,6 @@ export function EpisodesSection({
             ))}
           </div>
 
-          {/* Legend */}
           <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded bg-brand inline-block" /> Current
