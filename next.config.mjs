@@ -1,15 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: [
-    "@consumet/extensions",
-    "got-scraping",
-    "got-scraping-wrapper",
-    "got",
-  ],
+  experimental: {
+    serverComponentsExternalPackages: [
+      "@consumet/extensions",
+      "got-scraping",
+      "got-scraping-wrapper",
+      "got",
+    ],
+  },
 
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Client: replace with false (empty module)
       config.resolve.alias = {
         ...config.resolve.alias,
         "@consumet/extensions": false,
@@ -18,7 +19,6 @@ const nextConfig = {
         "got": false,
       };
     } else {
-      // Server: tell webpack NOT to bundle these at all
       config.externals = [
         ...(Array.isArray(config.externals) ? config.externals : []),
         "@consumet/extensions",
