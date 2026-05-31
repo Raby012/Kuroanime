@@ -14,22 +14,22 @@ export function getAnilistEmbedSources(
   const ep = isMovie ? 1 : episode;
   return [
     {
-      // AnimeKai - large library, AniList sync, current seasonal anime
+      // AnimeKai — large library, has current seasonal anime, AniList sync
       type: "embed",
       url: `https://anikai.to/watch/${anilistId}?ep=${ep}`,
       provider: "AnimeKai",
     },
     {
-      // AnimePahe direct watch link
-      type: "embed",
-      url: `https://animepahe.ru/a/${anilistId}`,
-      provider: "AnimePahe",
-    },
-    {
-      // AllAnime - reliable, has most seasonal titles
+      // AllAnime — very reliable, broad catalog
       type: "embed",
       url: `https://allanime.to/anime/${anilistId}/episode-${ep}`,
       provider: "AllAnime",
+    },
+    {
+      // AnimePahe — good quality, has most seasonal titles
+      type: "embed",
+      url: `https://animepahe.ru/a/${anilistId}`,
+      provider: "AnimePahe",
     },
   ];
 }
@@ -50,10 +50,12 @@ export function getEmbedSources(
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc 1" });
       sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`, provider: "VidSrc CC" });
       sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/movie/${imdbId}`, provider: "VidSrc 2" });
+      sources.push({ type: "embed", url: `https://www.2embed.cc/embed/${imdbId}`, provider: "2Embed" });
     } else {
       sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 1" });
       sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc CC" });
       sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 2" });
+      sources.push({ type: "embed", url: `https://www.2embed.cc/embedtv/${imdbId}&s=${season}&e=${episode}`, provider: "2Embed" });
     }
   }
 
