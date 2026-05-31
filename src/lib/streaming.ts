@@ -1,39 +1,31 @@
-// Streaming sources with fallback chain:
-// 1. GogoAnime via consumet.ts (real m3u8)
-// 2. AnimePahe via consumet.ts (real m3u8)
-// 3. VidSrc embed providers (iframe fallback)
+// src/lib/streaming.ts
+import "server-only";
+
+// Imports StreamSource from the single source of truth
 import type { StreamSource } from "@/lib/embed-sources";
 
-export type StreamSource =
-  | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
-  | { type: "embed"; url: string; provider: string };
+// Re-export so API route can import from one place if needed
+export type { StreamSource };
 
-// ── VidSrc Embed Providers (TMDB/IMDB based, most stable) ─────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
-export function getEmbedSources(imdbId: string | null, tmdbId: number | null, season: number, episode: number, isMovie: boolean): StreamSource[] {
-  const sources: StreamSource[] = [];
+export interface GogoResult {
+  id: string;
+  title: string;
+  url: string;
+  image?: string;
+}
 
-  if (imdbId) {
-    if (isMovie) {
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc 1" });
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`, provider: "VidSrc CC" });
-      sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/movie/${imdbId}`, provider: "VidSrc 2" });
-      sources.push({ type: "embed", url: `https://www.2embed.cc/embed/${imdbId}`, provider: "2Embed" });
-      sources.push({ type: "embed", url: `https://player.smashy.stream/movie/${imdbId}`, provider: "SmashyStream" });
-    } else {
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 1" });
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc CC" });
-      sources.push({ type: "embed", url: `https://vidsrcme.ru/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc 2" });
-      sources.push({ type: "embed", url: `https://www.2embed.cc/embedtv/${imdbId}&s=${season}&e=${episode}`, provider: "2Embed" });
-      sources.push({ type: "embed", url: `https://player.smashy.stream/tv/${imdbId}?s=${season}&e=${episode}`, provider: "SmashyStream" });
-    }
-  }
+export interface GogoEpisode {
+  id: string;
+  number: number;
+  url?: string;
+}
 
-  if (tmdbId && !isMovie) {
-    sources.push({ type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink" });
-  }
-
-  return sources;
+export interface PaheResult {
+  id: string;
+  title: string;
+  image?: string;
 }
 
 // ── GogoAnime via Consumet (server-side only) ─────────────────────────────
@@ -119,25 +111,4 @@ export async function getAnimePaheStream(episodeId: string): Promise<StreamSourc
     console.error("AnimePahe stream error:", e);
     return [];
   }
-}
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export interface GogoResult {
-  id: string;
-  title: string;
-  url: string;
-  image?: string;
-}
-
-export interface GogoEpisode {
-  id: string;
-  number: number;
-  url?: string;
-}
-
-export interface PaheResult {
-  id: string;
-  title: string;
-  image?: string;
 }
