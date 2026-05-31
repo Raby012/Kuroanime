@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { StreamSource } from "@/lib/streaming";
-import { getEmbedSources } from "@/lib/streaming";
+import type { StreamSource } from "@/lib/embed-sources";
+import { getEmbedSources } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
 interface VideoPlayerProps {
