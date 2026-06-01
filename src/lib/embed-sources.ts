@@ -4,7 +4,7 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
 
-// ── AniList-ID based embeds ────────────────────────────────────────────────
+// ── AniList-ID based embeds (ACTUALLY WORK) ────────────────────────────────
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -14,34 +14,44 @@ export function getAnilistEmbedSources(
   const ep = isMovie ? 1 : episode;
   return [
     {
-      // MegaPlay Sub — try first
+      // MegaPlay — full HiAnime library, direct AniList ID support
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
       provider: "MegaPlay Sub",
     },
     {
-      // MegaPlay Dub — often works when Sub 404s
+      // MegaPlay Dub
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`,
       provider: "MegaPlay Dub",
     },
-    {
-      // MegaPlay using MAL ID via anilistId as fallback attempt
-      // (some titles only mapped by MAL on their side)
-      type: "embed",
-      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
-      provider: "MegaPlay Alt",
-    },
   ];
 }
 
-// AutoEmbed is dead — return empty
+// ── Title-slug based (AutoEmbed) ───────────────────────────────────────────
+
 export function getAutoEmbedSource(
-  _title: string,
-  _year: number | null,
-  _episode: number
+  title: string,
+  year: number | null,
+  episode: number
 ): StreamSource[] {
-  return [];
+  // AutoEmbed format: lowercase, spaces→hyphens, append year
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .trim();
+
+  const slugWithYear = year ? `${slug}-${year}` : slug;
+
+  return [
+    {
+      type: "embed",
+      url: `https://anime.autoembed.cc/embed/${slugWithYear}-episode-${episode}`,
+      provider: "AutoEmbed",
+    },
+  ];
 }
 
 // ── IMDb/TMDB based embeds ─────────────────────────────────────────────────
@@ -55,75 +65,24 @@ export function getEmbedSources(
 ): StreamSource[] {
   const sources: StreamSource[] = [];
 
-  if (tmdbId) {
+  if (imdbId) {
     if (isMovie) {
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.cc/v2/embed/movie/${tmdbId}`,
-        provider: "VidSrc CC",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.to/embed/movie/${tmdbId}`,
-        provider: "VidSrc",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.fyi/embed/movie/${tmdbId}`,
-        provider: "VidSrc FYI",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidlink.pro/movie/${tmdbId}`,
-        provider: "VidLink",
-      });
+      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`, provider: "VidSrc CC" });
+      sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc" });
+      sources.push({ type: "embed", url: `https://www.2embed.cc/embed/${imdbId}`, provider: "2Embed" });
     } else {
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc CC",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc FYI",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidLink",
-      });
+      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc CC" });
+      sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc" });
+      sources.push({ type: "embed", url: `https://www.2embed.cc/embedtv/${imdbId}&s=${season}&e=${episode}`, provider: "2Embed" });
     }
   }
 
-  if (imdbId) {
+  if (tmdbId) {
     if (isMovie) {
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`,
-        provider: "VidSrc CC (IMDb)",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.to/embed/movie/${imdbId}`,
-        provider: "VidSrc (IMDb)",
-      });
+      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${tmdbId}`, provider: "VidSrc TMDB" });
     } else {
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`,
-        provider: "VidSrc CC (IMDb)",
-      });
-      sources.push({
-        type: "embed",
-        url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`,
-        provider: "VidSrc (IMDb)",
-      });
+      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc TMDB" });
+      sources.push({ type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink" });
     }
   }
 
