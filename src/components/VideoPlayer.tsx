@@ -59,6 +59,16 @@ export function VideoPlayer({
     const anikotoPromise = fetch(
       `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
     ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
+    // Try Anikoto API — gets real HiAnime episode IDs for best quality
+if (malId) {
+  try {
+    const res = await fetch(
+      `/api/anikoto?malId=${malId}&episode=${episode}&title=${encodeURIComponent(animeTitle)}`
+    );
+    const data = await res.json();
+    if (data.sources?.length) all.unshift(...data.sources);
+  } catch {}
+}
 
     // 3. TMDB embeds
     const tmdbPromise = fetch(
