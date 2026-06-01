@@ -24,31 +24,20 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
 
   const title = anime.title.english || anime.title.romaji;
 
-  // Extract IMDB ID from external links
-  const imdbLink = anime.externalLinks.find(
-    (l) => l.site === "IMDb" || l.url.includes("imdb.com")
+  const imdbLink = anime.externalLinks?.find(
+    (l) => l.site === "IMDb" || l.url?.includes("imdb.com")
   );
-  const imdbId = imdbLink?.url.match(/tt\d+/)?.[0] || null;
+  const imdbId = imdbLink?.url?.match(/tt\d+/)?.[0] || null;
 
   const isMovie = anime.format === "MOVIE";
+  const totalEpisodes = anime.episodes || (isMovie ? 1 : 12);
 
-  // Correct episode count for ongoing anime
-  const totalEpisodes = (() => {
-    if (isMovie) return 1;
-    if (anime.status === "RELEASING" && anime.nextAiringEpisode?.episode) {
-      return anime.nextAiringEpisode.episode - 1;
-    }
-    return anime.episodes || 12;
-  })();
-
-  // Related anime
-  const related = anime.relations.edges
-    .filter((e) =>
+  const related = anime.relations?.edges
+    ?.filter((e) =>
       ["SEQUEL", "PREQUEL", "SIDE_STORY", "ALTERNATIVE"].includes(e.relationType)
     )
-    .slice(0, 6);
+    .slice(0, 6) || [];
 
-  // Recommendations
   const recs = (anime.recommendations?.nodes || [])
     .filter((n) => n.mediaRecommendation)
     .slice(0, 10);
@@ -91,7 +80,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
                 className="w-full"
               />
             </div>
-            <div className="mt-3 space-y-2">
+            <div className="mt-3">
               <WatchlistButton
                 anilistId={anime.id}
                 title={title}
@@ -109,7 +98,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
               {title.toUpperCase()}
             </h1>
 
-            {/* Stats row */}
+            {/* Stats */}
             <div className="flex flex-wrap items-center gap-4 mb-4 text-sm text-gray-400">
               {anime.averageScore && (
                 <span className="flex items-center gap-1.5 text-yellow-400">
@@ -119,12 +108,9 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
                   </span>
                 </span>
               )}
-              {totalEpisodes > 0 && (
+              {anime.episodes && (
                 <span className="flex items-center gap-1.5">
-                  <Tv size={15} className="text-brand" />
-                  {anime.status === "RELEASING"
-                    ? `${totalEpisodes} / ${anime.episodes ?? "?"} eps`
-                    : `${totalEpisodes} eps`}
+                  <Tv size={15} className="text-brand" /> {anime.episodes} eps
                 </span>
               )}
               {anime.duration && (
@@ -134,13 +120,13 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
               )}
               {anime.seasonYear && (
                 <span className="flex items-center gap-1.5">
-                  <Calendar size={15} className="text-brand" /> {anime.season}{" "}
-                  {anime.seasonYear}
+                  <Calendar size={15} className="text-brand" />
+                  {anime.season} {anime.seasonYear}
                 </span>
               )}
               {anime.popularity && (
                 <span className="flex items-center gap-1.5">
-                  <Users size={15} className="text-brand" />{" "}
+                  <Users size={15} className="text-brand" />
                   {anime.popularity.toLocaleString()}
                 </span>
               )}
@@ -161,7 +147,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
 
             {/* Genres */}
             <div className="flex flex-wrap gap-2 mb-4">
-              {anime.genres.map((g) => (
+              {anime.genres?.map((g) => (
                 <span
                   key={g}
                   className="text-xs bg-surface-2 border border-white/10 text-gray-300 px-3 py-1 rounded-full"
@@ -171,8 +157,8 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
               ))}
             </div>
 
-            {/* Studios */}
-            {anime.studios.nodes.length > 0 && (
+            {/* Studio */}
+            {anime.studios?.nodes?.length > 0 && (
               <p className="text-sm text-gray-400 mb-4">
                 Studio:{" "}
                 <span className="text-brand font-medium">
@@ -201,12 +187,10 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
             imdbId={imdbId}
             tmdbId={null}
           />
-
-          
         </div>
 
         {/* Characters */}
-        {anime.characters.edges.length > 0 && (
+        {anime.characters?.edges?.length > 0 && (
           <section className="mt-12">
             <h2 className="font-display text-2xl text-white mb-4">CHARACTERS</h2>
             <div className="flex gap-3 overflow-x-auto pb-2">
@@ -237,26 +221,24 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
             <h2 className="font-display text-2xl text-white mb-4">RELATED</h2>
             <div className="flex gap-4 overflow-x-auto pb-2">
               {related.map(({ node, relationType }) => (
-                <div key={node.id} className="shrink-0">
-                  <div className="relative">
-                    <AnimeCard
-                      anime={{
-                        id: node.id,
-                        title: node.title,
-                        coverImage: {
-                          large: node.coverImage.large,
-                          extraLarge: node.coverImage.large,
-                          medium: node.coverImage.large,
-                          color: null,
-                        },
-                        format: node.format,
-                      } as any}
-                      size="sm"
-                    />
-                    <span className="absolute top-0 left-0 right-0 text-center text-xs bg-surface-2/80 text-brand py-0.5 rounded-t-xl">
-                      {relationType.replace("_", " ")}
-                    </span>
-                  </div>
+                <div key={node.id} className="shrink-0 relative">
+                  <AnimeCard
+                    anime={{
+                      id: node.id,
+                      title: node.title,
+                      coverImage: {
+                        large: node.coverImage.large,
+                        extraLarge: node.coverImage.large,
+                        medium: node.coverImage.large,
+                        color: null,
+                      },
+                      format: node.format,
+                    } as any}
+                    size="sm"
+                  />
+                  <span className="absolute top-0 left-0 right-0 text-center text-xs bg-surface-2/80 text-brand py-0.5 rounded-t-xl">
+                    {relationType.replace("_", " ")}
+                  </span>
                 </div>
               ))}
             </div>
