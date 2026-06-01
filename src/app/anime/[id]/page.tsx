@@ -195,11 +195,14 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
           <EpisodesSection
             animeTitle={title}
             anilistId={anime.id}
+            malId={anime.idMal}
             totalEpisodes={totalEpisodes}
             isMovie={isMovie}
             imdbId={imdbId}
-            seasonYear={anime.seasonYear}
+            tmdbId={null}
           />
+
+          
         </div>
 
         {/* Characters */}
