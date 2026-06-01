@@ -73,7 +73,7 @@ export function EpisodesSection({
   );
 
   return (
-    <div className="w-full">
+    <div>
       {/* Video Player */}
       <VideoPlayer
         animeTitle={animeTitle}
@@ -97,13 +97,12 @@ export function EpisodesSection({
               </p>
             </div>
 
-            {/* Page navigation */}
             {totalPages > 1 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide max-w-full">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={page === 0}
-                  className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors shrink-0"
+                  className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -111,7 +110,7 @@ export function EpisodesSection({
                   <button
                     key={i}
                     onClick={() => setPage(i)}
-                    className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors shrink-0 whitespace-nowrap ${
+                    className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
                       page === i
                         ? "bg-brand text-white font-bold"
                         : "bg-surface-2 text-gray-400 hover:text-white"
@@ -126,7 +125,7 @@ export function EpisodesSection({
                     setPage((p) => Math.min(totalPages - 1, p + 1))
                   }
                   disabled={page === totalPages - 1}
-                  className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors shrink-0"
+                  className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
                 >
                   <ChevronRight size={16} />
                 </button>
@@ -135,7 +134,7 @@ export function EpisodesSection({
           </div>
 
           {/* Episode grid */}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(40px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(44px,1fr))] gap-1.5 sm:gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(44px,1fr))] gap-2">
             {pageEpisodes.map((ep) => (
               <button
                 key={ep}
@@ -152,11 +151,10 @@ export function EpisodesSection({
           {/* Legend */}
           <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-brand inline-block" />
-              Current
+              <span className="w-3 h-3 rounded bg-brand inline-block" /> Current
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-[#1a3020] inline-block" />
+              <span className="w-3 h-3 rounded bg-[#1a3020] inline-block" />{" "}
               Watched
             </span>
           </div>
