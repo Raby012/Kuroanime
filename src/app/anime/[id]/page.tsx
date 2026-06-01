@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
-import { getAnilistEpisodeData } from "@/lib/anilist";
+import { getAnimeById, getAnimeEpisodeData } from "@/lib/anilist"; // ✅ Fixed imports
 import { EpisodesSection } from "@/components/EpisodesSection";
-import { VideoPlayer } from "@/components/VideoPlayer"; // Adjust path if needed
+import { VideoPlayer } from "@/components/VideoPlayer";
 
 interface AnimePageProps {
   params: Promise<{ id: string }>;
@@ -12,41 +12,23 @@ export default async function AnimePage({ params }: AnimePageProps) {
   const anilistId = Number(id);
   if (isNaN(anilistId)) return notFound();
 
-  // 1. Fetch official data from AniList
-  const media = await getAnilistEpisodeData(anilistId);
+  // 1. Fetch official data from AniList using the correct function
+  const media = await getAnimeById(anilistId);
   if (!media) return notFound();
 
-  // 2. Calculate True Episode Count
-  let totalEpisodes = media?.episodes || 0;
-  const nextAiring = media?.nextAiringEpisode?.episode || null;
-  const status = media?.status || "";
+  // 2. Calculate True Episode Count using the existing helper
+  const { totalEpisodes } = getAnimeEpisodeData(media);
 
-  // FIX: Ongoing anime with null episodes
-  if (!totalEpisodes && nextAiring) {
-    totalEpisodes = nextAiring - 1;
-  }
-
-  // FIX: Known long series (One Piece)
-  if (anilistId === 21 && totalEpisodes === 0) {
-    totalEpisodes = 1122; // True total as of 2026
-  }
-
-  // FIX: Finished anime with null episodes (Fallback to manual check)
-  if (totalEpisodes === 0 && status === "FINISHED") {
-    // For safety, set a fallback
-    totalEpisodes = 12; // Minimal placeholder
-  }
-
-  // 3. Get basic info from your existing data source
-  // You likely have a separate function for this (e.g., getAnimeInfo)
-  // I'll simulate it here with placeholder data.
+  // 3. Prepare anime info
   const animeInfo = {
-    title: media.title?.romaji || "Unknown",
+    title: media.title?.userPreferred || media.title?.romaji || "Unknown",
     image: media.coverImage?.large || "",
     description: media.description || "",
     isMovie: media.format === "MOVIE",
     imdbId: null, // You'll need to get this from your other API
     malId: media.idMal || null,
+    season: media.season || "UNKNOWN",
+    seasonYear: media.seasonYear || undefined,
   };
 
   return (
@@ -62,7 +44,7 @@ export default async function AnimePage({ params }: AnimePageProps) {
           episode={1} // Default start episode
           isMovie={animeInfo.isMovie}
           imdbId={animeInfo.imdbId}
-          // Add other props as needed
+          seasonYear={animeInfo.seasonYear} // Pass this for better TMDB lookups
         />
       </div>
 
@@ -70,7 +52,7 @@ export default async function AnimePage({ params }: AnimePageProps) {
       <EpisodesSection
         animeTitle={animeInfo.title}
         anilistId={anilistId}
-        totalEpisodes={totalEpisodes} // ✅ THE FIX IS HERE
+        totalEpisodes={totalEpisodes} // ✅ Now uses the correctly calculated count
         isMovie={animeInfo.isMovie}
         imdbId={animeInfo.imdbId}
         malId={animeInfo.malId}
