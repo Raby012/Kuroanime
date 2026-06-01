@@ -31,6 +31,9 @@ const nextConfig = {
   },
 
   images: {
+    qualities: [75, 85, 90, 95, 100],
+    deviceSizes: [360, 480, 640, 750, 828, 1080, 1200, 1920],
+    imageSizes: [64, 96, 128, 144, 176, 208, 256],
     remotePatterns: [
       { protocol: "https", hostname: "s4.anilist.co" },
       { protocol: "https", hostname: "img.anili.st" },
