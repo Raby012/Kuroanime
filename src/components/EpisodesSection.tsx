@@ -1,97 +1,236 @@
 "use client";
-
 import { useState, useEffect } from "react";
+import { VideoPlayer } from "@/components/VideoPlayer";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import toast from "react-hot-toast";
+
+const EPISODES_PER_PAGE = 100;
+
+interface Season { season_number: number; episode_count: number; }
 
 interface EpisodesSectionProps {
   animeTitle: string;
   anilistId: number;
-  totalEpisodes: number;
-  isMovie?: boolean;
-  imdbId?: string | null;
   malId?: number | null;
+  totalEpisodes: number;
+  isMovie: boolean;
+  imdbId?: string | null;
+  tmdbId?: number | null;
 }
 
 export function EpisodesSection({
   animeTitle,
   anilistId,
-  totalEpisodes,
-  isMovie = false,
-  imdbId,
   malId,
+  totalEpisodes,
+  isMovie,
+  imdbId,
+  tmdbId,
 }: EpisodesSectionProps) {
-  const [currentPage, setCurrentPage] = useState(1);
-  const EPISODES_PER_PAGE = 20;
+  const [episode, setEpisode] = useState(1);
+  const [season, setSeason] = useState(1);
+  const [page, setPage] = useState(0);
+  const [watchedEps, setWatchedEps] = useState<Set<number>>(new Set());
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [currSeasonEps, setCurrSeasonEps] = useState(totalEpisodes);
 
-  // If totalEpisodes is 0, show a fallback
-  const actualTotal = totalEpisodes > 0 ? totalEpisodes : 12;
+  // Update currSeasonEps when totalEpisodes changes
+  useEffect(() => {
+    if (seasons.length === 0) setCurrSeasonEps(totalEpisodes);
+  }, [totalEpisodes, seasons.length]);
 
-  // Calculate start and end episode for the current page
-  const startEpisode = (currentPage - 1) * EPISODES_PER_PAGE + 1;
-  const endEpisode = Math.min(currentPage * EPISODES_PER_PAGE, actualTotal);
+  // Fetch TMDB seasons if key available
+  useEffect(() => {
+    const key = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+    if (!tmdbId || !key) return;
+    fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${key}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const s: Season[] = (data.seasons || []).filter(
+          (s: Season) => s.season_number > 0 && s.episode_count > 0
+        );
+        if (s.length > 0) {
+          setSeasons(s);
+          setCurrSeasonEps(s[0].episode_count);
+        }
+      })
+      .catch(() => {});
+  }, [tmdbId]);
 
-  const totalPages = Math.ceil(actualTotal / EPISODES_PER_PAGE);
+  useEffect(() => {
+    if (!seasons.length) return;
+    const s = seasons.find((s) => s.season_number === season);
+    if (s) {
+      setCurrSeasonEps(s.episode_count);
+      setEpisode(1);
+      setPage(0);
+    }
+  }, [season, seasons]);
 
-  // Handle episode click (You may already have this logic)
-  const handleEpisodeClick = (episodeNumber: number) => {
-    // Tell the VideoPlayer to load this episode
-    // You can use a state manager (like Zustand), Context, or a URL param
-    // Example: window.location.href = `/anime/${anilistId}?ep=${episodeNumber}`;
-    console.log(`Playing episode ${episodeNumber}`);
-    // Add your logic here
-  };
+  // Load saved progress
+  useEffect(() => {
+    fetch(`/api/progress?anilistId=${anilistId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.episode) {
+          const prev = new Set<number>();
+          for (let i = 1; i <= data.episode; i++) prev.add(i);
+          setWatchedEps(prev);
+          setEpisode(data.episode);
+          setSeason(data.season || 1);
+          setPage(Math.floor((data.episode - 1) / EPISODES_PER_PAGE));
+        }
+      })
+      .catch(() => {});
+  }, [anilistId]);
 
-  if (actualTotal === 0) {
-    return (
-      <div className="text-center text-gray-500 py-8">
-        No episode information available.
-      </div>
-    );
+  function handleProgress(ep: number) {
+    setWatchedEps((prev) => new Set([...prev, ep]));
+    fetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anilistId, episode: ep, season }),
+    }).catch(() => {});
   }
 
-  return (
-    <div className="mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">
-          Episodes <span className="text-sm text-gray-400 font-normal">(1-{actualTotal})</span>
-        </h3>
-        
-        {/* Pagination Controls */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 rounded-md bg-surface-1 text-xs disabled:opacity-50 hover:bg-surface-2 transition-colors"
-          >
-            Previous
-          </button>
-          <span className="text-xs text-gray-400">
-            {currentPage} / {totalPages}
-          </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage >= totalPages}
-            className="px-3 py-1 rounded-md bg-surface-1 text-xs disabled:opacity-50 hover:bg-surface-2 transition-colors"
-          >
-            Next
-          </button>
-        </div>
-      </div>
+  function handleEpisodeEnd() {
+    if (episode < currSeasonEps) {
+      const next = episode + 1;
+      setEpisode(next);
+      toast.success(`Playing episode ${next}`);
+      if (next > (page + 1) * EPISODES_PER_PAGE) setPage((p) => p + 1);
+    } else if (seasons.length > 0) {
+      const nextSeason = seasons.find((s) => s.season_number > season);
+      if (nextSeason) {
+        setSeason(nextSeason.season_number);
+        toast.success(`Starting Season ${nextSeason.season_number}!`);
+      }
+    } else {
+      toast("You've finished this anime! 🎉", { icon: "✨" });
+    }
+  }
 
-      {/* Episode Grid */}
-      <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-        {Array.from({ length: endEpisode - startEpisode + 1 }, (_, i) => {
-          const epNum = startEpisode + i;
-          return (
-            <button
-              key={epNum}
-              onClick={() => handleEpisodeClick(epNum)}
-              className="aspect-square rounded-md flex items-center justify-center text-sm bg-surface-1 hover:bg-surface-2 hover:text-brand transition-colors border border-transparent hover:border-brand/50"
-            >
-              {epNum}
-            </button>
-          );
-        })}
-      </div>
+  const effectiveTotal = currSeasonEps || totalEpisodes;
+  const totalPages = Math.ceil(effectiveTotal / EPISODES_PER_PAGE);
+  const startEp = page * EPISODES_PER_PAGE + 1;
+  const endEp = Math.min((page + 1) * EPISODES_PER_PAGE, effectiveTotal);
+  const pageEpisodes = Array.from(
+    { length: Math.max(0, endEp - startEp + 1) },
+    (_, i) => startEp + i
+  );
+
+  return (
+    <div>
+      <VideoPlayer
+        anilistId={anilistId}
+        malId={malId}
+        animeTitle={animeTitle}
+        episode={episode}
+        season={season}
+        imdbId={imdbId}
+        tmdbId={tmdbId}
+        isMovie={isMovie}
+        onEpisodeEnd={handleEpisodeEnd}
+        onProgress={handleProgress}
+      />
+
+      {!isMovie && effectiveTotal > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <h3 className="font-display text-xl text-white">EPISODES</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Episode {episode} / {effectiveTotal}
+              </p>
+            </div>
+
+            <div className="flex gap-3 flex-wrap items-center">
+              {/* Season tabs */}
+              {seasons.length > 1 && (
+                <div className="flex gap-1.5 flex-wrap">
+                  {seasons.map((s) => (
+                    <button
+                      key={s.season_number}
+                      onClick={() => setSeason(s.season_number)}
+                      className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                        season === s.season_number
+                          ? "bg-brand text-white font-bold"
+                          : "bg-surface-2 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      S{s.season_number}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Page selector */}
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setPage(i);
+                        setEpisode(i * EPISODES_PER_PAGE + 1);
+                      }}
+                      className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                        page === i
+                          ? "bg-brand text-white font-bold"
+                          : "bg-surface-2 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {i * EPISODES_PER_PAGE + 1}–
+                      {Math.min((i + 1) * EPISODES_PER_PAGE, effectiveTotal)}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setPage((p) => Math.min(totalPages - 1, p + 1))
+                    }
+                    disabled={page === totalPages - 1}
+                    className="p-1.5 rounded-lg bg-surface-2 text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Episode grid */}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(44px,1fr))] gap-2">
+            {pageEpisodes.map((ep) => (
+              <button
+                key={ep}
+                onClick={() => setEpisode(ep)}
+                className={`ep-btn ${episode === ep ? "active" : ""} ${
+                  watchedEps.has(ep) && episode !== ep ? "watched" : ""
+                }`}
+              >
+                {ep}
+              </button>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-brand inline-block" /> Current
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-[#1a3020] inline-block" /> Watched
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
