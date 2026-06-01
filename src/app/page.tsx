@@ -1,121 +1,163 @@
-import Image from "next/image";
 import Link from "next/link";
-import { getTrending, getPopular, getSeasonalAnime, type AnilistMedia } from "@/lib/anilist";
+import Image from "next/image";
+import {
+  getTrending,
+  getPopular,
+  getSeasonalAnime,
+  getAiringSchedule,
+  type AnilistMedia,
+  type AiringSchedule,
+} from "@/lib/anilist";
 import { AnimeCard } from "@/components/AnimeCard";
-import { Play, Star, TrendingUp, Calendar, Flame } from "lucide-react";
+import { HeroSlider } from "@/components/HeroSlider";
+import { TrendingUp, Calendar, Flame, Clock, Tv } from "lucide-react";
+
+export const revalidate = 900;
 
 export default async function HomePage() {
-  const [trending, popular, seasonal] = await Promise.all([
+  const [trending, popular, seasonal, schedule] = await Promise.all([
     getTrending(1, 20),
     getPopular(1, 20),
     getSeasonalAnime(),
+    getAiringSchedule(),
   ]);
 
-  const hero = trending[0];
+  const now = Math.floor(Date.now() / 1000);
+  const latestEpisodes = schedule
+    .filter((s) => s.airingAt <= now)
+    .sort((a, b) => b.airingAt - a.airingAt)
+    .slice(0, 20);
+
+  const heroAnime = trending.slice(0, 5);
 
   return (
     <div className="pb-16">
-      {/* Hero */}
-      {hero && <HeroSection anime={hero} />}
+      {heroAnime.length > 0 && <HeroSlider items={heroAnime} />}
 
-      {/* Trending */}
-      <Section title="Trending Now" icon={<Flame size={20} className="text-brand" />} items={trending} />
+      {latestEpisodes.length > 0 && (
+        <LatestEpisodesSection episodes={latestEpisodes} />
+      )}
 
-      {/* Seasonal */}
-      <Section title="This Season" icon={<Calendar size={20} className="text-brand" />} items={seasonal} />
-
-      {/* Popular */}
-      <Section title="All Time Popular" icon={<TrendingUp size={20} className="text-brand" />} items={popular} />
+      <Section
+        title="Trending Now"
+        icon={<Flame size={20} className="text-brand" />}
+        items={trending}
+        href="/trending"
+      />
+      <Section
+        title="This Season"
+        icon={<Calendar size={20} className="text-brand" />}
+        items={seasonal}
+        href="/seasonal"
+      />
+      <Section
+        title="All Time Popular"
+        icon={<TrendingUp size={20} className="text-brand" />}
+        items={popular}
+        href="/top"
+      />
     </div>
   );
 }
 
-function HeroSection({ anime }: { anime: AnilistMedia }) {
-  const title = anime.title.english || anime.title.romaji;
-  const desc = anime.description?.replace(/<[^>]*>/g, "").slice(0, 200) + "...";
-
+function LatestEpisodesSection({ episodes }: { episodes: AiringSchedule[] }) {
   return (
-    <section className="relative h-[85vh] min-h-[500px] flex items-end pb-16 overflow-hidden">
-      {/* Background */}
-      {anime.bannerImage && (
-        <>
-          <Image
-            src={anime.bannerImage}
-            alt={title}
-            fill
-            className="object-cover"
-            priority
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-surface/90 via-transparent to-transparent" />
-        </>
-      )}
-
-      {/* Content */}
-      <div className="relative z-10 max-w-7xl mx-auto px-4 w-full">
-        <div className="max-w-xl">
-          {/* Badges */}
-          <div className="flex items-center gap-2 mb-3">
-            <span className="bg-brand/90 text-white text-xs font-bold px-2 py-0.5 rounded">
-              #{anime.trending} TRENDING
-            </span>
-            {anime.format && (
-              <span className="bg-surface-2/80 text-gray-300 text-xs px-2 py-0.5 rounded">
-                {anime.format}
-              </span>
-            )}
-          </div>
-
-          {/* Title */}
-          <h1 className="font-display text-5xl md:text-7xl text-white leading-none mb-3">
-            {title.toUpperCase()}
-          </h1>
-
-          {/* Meta */}
-          <div className="flex items-center gap-4 text-sm text-gray-400 mb-4">
-            {anime.averageScore && (
-              <span className="flex items-center gap-1">
-                <Star size={14} className="text-yellow-400 fill-yellow-400" />
-                {(anime.averageScore / 10).toFixed(1)}
-              </span>
-            )}
-            {anime.episodes && <span>{anime.episodes} Episodes</span>}
-            {anime.seasonYear && <span>{anime.season} {anime.seasonYear}</span>}
-          </div>
-
-          {/* Description */}
-          <p className="text-gray-300 text-sm leading-relaxed line-clamp-3 mb-6">{desc}</p>
-
-          {/* Genres */}
-          <div className="flex flex-wrap gap-2 mb-6">
-            {anime.genres.slice(0, 4).map((g) => (
-              <span key={g} className="text-xs bg-surface-2/80 text-gray-300 px-3 py-1 rounded-full">
-                {g}
-              </span>
-            ))}
-          </div>
-
-          {/* CTA */}
-          <Link
-            href={`/anime/${anime.id}`}
-            className="inline-flex items-center gap-2 bg-brand hover:bg-brand-dark text-white font-semibold px-6 py-3 rounded-full transition-colors"
-          >
-            <Play size={18} fill="white" /> Watch Now
-          </Link>
+    <section className="max-w-7xl mx-auto px-4 mt-10">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <Clock size={20} className="text-brand" />
+          <h2 className="font-display text-xl sm:text-2xl text-white tracking-wide">
+            LATEST EPISODES
+          </h2>
         </div>
+        <Link
+          href="/schedule"
+          className="text-xs text-brand hover:text-brand-light transition-colors font-medium"
+        >
+          View Schedule →
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {episodes.map((ep) => (
+          <LatestEpisodeCard key={`${ep.media.id}-${ep.episode}`} ep={ep} />
+        ))}
       </div>
     </section>
   );
 }
 
-function Section({ title, icon, items }: { title: string; icon: React.ReactNode; items: AnilistMedia[] }) {
+function LatestEpisodeCard({ ep }: { ep: AiringSchedule }) {
+  const title = ep.media.title.english || ep.media.title.romaji;
+  const airedAgo = Math.floor((Date.now() / 1000 - ep.airingAt) / 3600);
+  const timeLabel =
+    airedAgo < 1
+      ? "Just aired"
+      : airedAgo < 24
+      ? `${airedAgo}h ago`
+      : `${Math.floor(airedAgo / 24)}d ago`;
+
   return (
-    <section className="max-w-7xl mx-auto px-4 mt-12">
-      <div className="flex items-center gap-2 mb-5">
-        {icon}
-        <h2 className="font-display text-2xl text-white tracking-wide">{title.toUpperCase()}</h2>
+    <Link
+      href={`/anime/${ep.media.id}`}
+      className="flex items-center gap-3 bg-surface-1 hover:bg-surface-2 border border-white/5 hover:border-brand/30 rounded-xl p-3 transition-all group"
+    >
+      <div className="relative w-16 h-20 shrink-0 rounded-lg overflow-hidden bg-surface-2">
+        <Image
+          src={ep.media.coverImage.medium}
+          alt={title}
+          fill
+          className="object-cover group-hover:scale-105 transition-transform duration-300"
+          sizes="64px"
+        />
       </div>
-      <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+      <div className="flex-1 min-w-0">
+        <h3 className="text-sm font-medium text-white line-clamp-2 leading-snug mb-1">
+          {title}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <Tv size={11} className="text-brand shrink-0" />
+          <span>Episode {ep.episode}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-600 mt-0.5">
+          <Clock size={11} className="shrink-0" />
+          <span>{timeLabel}</span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function Section({
+  title,
+  icon,
+  items,
+  href,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  items: AnilistMedia[];
+  href?: string;
+}) {
+  return (
+    <section className="max-w-7xl mx-auto px-4 mt-10 sm:mt-12">
+      <div className="flex items-center justify-between mb-4 sm:mb-5">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h2 className="font-display text-xl sm:text-2xl text-white tracking-wide">
+            {title.toUpperCase()}
+          </h2>
+        </div>
+        {href && (
+          <Link
+            href={href}
+            className="text-xs text-brand hover:text-brand-light transition-colors font-medium shrink-0"
+          >
+            See All →
+          </Link>
+        )}
+      </div>
+      <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
         {items.map((anime) => (
           <div key={anime.id} className="shrink-0">
             <AnimeCard anime={anime} size="md" />
