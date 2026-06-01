@@ -1,5 +1,8 @@
 const ANILIST_URL = "https://graphql.anilist.co";
 
+// Cache for 15 minutes by default — auto-updates episode/season data
+const DEFAULT_REVALIDATE = 900;
+
 const MEDIA_FIELDS = `
   id idMal
   title { romaji english native userPreferred }
@@ -25,12 +28,16 @@ const MEDIA_FIELDS = `
   }
 `;
 
-async function query<T>(q: string, variables?: Record<string, unknown>): Promise<T> {
+async function query<T>(
+  q: string,
+  variables?: Record<string, unknown>,
+  revalidate = DEFAULT_REVALIDATE
+): Promise<T> {
   const res = await fetch(ANILIST_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ query: q, variables }),
-    next: { revalidate: 3600 },
+    next: { revalidate },
   });
   if (!res.ok) throw new Error(`AniList error: ${res.status}`);
   const json = await res.json();
@@ -70,7 +77,13 @@ export async function getSeasonalAnime(season?: string, year?: number) {
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentSeason =
-    currentMonth <= 3 ? "WINTER" : currentMonth <= 6 ? "SPRING" : currentMonth <= 9 ? "SUMMER" : "FALL";
+    currentMonth <= 3
+      ? "WINTER"
+      : currentMonth <= 6
+      ? "SPRING"
+      : currentMonth <= 9
+      ? "SUMMER"
+      : "FALL";
 
   const q = `
     query ($season: MediaSeason, $year: Int, $page: Int, $perPage: Int) {
@@ -81,12 +94,17 @@ export async function getSeasonalAnime(season?: string, year?: number) {
       }
     }
   `;
-  const data = await query<{ Page: { media: AnilistMedia[] } }>(q, {
-    season: season || currentSeason,
-    year: year || now.getFullYear(),
-    page: 1,
-    perPage: 20,
-  });
+  const data = await query<{ Page: { media: AnilistMedia[] } }>(
+    q,
+    {
+      season: season || currentSeason,
+      year: year || now.getFullYear(),
+      page: 1,
+      perPage: 20,
+    },
+    // Seasonal data changes less often
+    3600
+  );
   return data.Page.media;
 }
 
@@ -101,7 +119,11 @@ export async function searchAnime(search: string, page = 1, perPage = 20) {
       }
     }
   `;
-  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(q, { search, page, perPage });
+  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
+    q,
+    { search, page, perPage },
+    60 // Search results: 1 minute cache
+  );
   return data.Page;
 }
 
@@ -116,7 +138,12 @@ export async function getAnimeById(id: number) {
       }
     }
   `;
-  const data = await query<{ Media: AnilistMedia }>(q, { id });
+  const data = await query<{ Media: AnilistMedia }>(
+    q,
+    { id },
+    // Individual anime pages: 15 min (episode count updates)
+    900
+  );
   return data.Media;
 }
 
@@ -141,7 +168,11 @@ export async function getTopAnime(page = 1, perPage = 50) {
       }
     }
   `;
-  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(q, { page, perPage });
+  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
+    q,
+    { page, perPage },
+    3600
+  );
   return data.Page;
 }
 
@@ -156,13 +187,20 @@ export async function getAnimeByGenre(genre: string, page = 1, perPage = 30) {
       }
     }
   `;
-  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(q, { genre, page, perPage });
+  const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
+    q,
+    { genre, page, perPage },
+    3600
+  );
   return data.Page;
 }
 
 export async function getAiringSchedule() {
   const now = Math.floor(Date.now() / 1000);
+  // Show episodes aired in last 48h AND upcoming 7 days
+  const twoDaysAgo = now - 2 * 24 * 60 * 60;
   const weekLater = now + 7 * 24 * 60 * 60;
+
   const q = `
     query ($from: Int, $to: Int) {
       Page(perPage: 50) {
@@ -172,20 +210,26 @@ export async function getAiringSchedule() {
             id title { english romaji }
             coverImage { large medium }
             format episodes
+            status
           }
         }
       }
     }
   `;
-  const data = await query<{ Page: { airingSchedules: AiringSchedule[] } }>(q, { from: now, to: weekLater });
+  const data = await query<{ Page: { airingSchedules: AiringSchedule[] } }>(
+    q,
+    { from: twoDaysAgo, to: weekLater },
+    // Airing schedule: refresh every 5 minutes
+    300
+  );
   return data.Page.airingSchedules;
 }
 
 export const ALL_GENRES = [
-  "Action","Adventure","Comedy","Drama","Fantasy",
-  "Horror","Mecha","Music","Mystery","Psychological",
-  "Romance","Sci-Fi","Slice of Life","Sports",
-  "Supernatural","Thriller","Isekai","Harem",
+  "Action", "Adventure", "Comedy", "Drama", "Fantasy",
+  "Horror", "Mecha", "Music", "Mystery", "Psychological",
+  "Romance", "Sci-Fi", "Slice of Life", "Sports",
+  "Supernatural", "Thriller", "Isekai", "Harem",
 ];
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -251,6 +295,7 @@ export interface AiringSchedule {
     coverImage: { large: string; medium: string };
     format: string | null;
     episodes: number | null;
+    status?: string | null;
   };
 }
 
