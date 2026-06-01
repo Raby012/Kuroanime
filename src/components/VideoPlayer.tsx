@@ -50,62 +50,58 @@ export function VideoPlayer({
     setEmbedLoaded(false);
     setEmbedError(false);
 
-    const allSources: StreamSource[] = [];
+    // 1. Primary Sources (Direct Embeds from MegaPlay & VidSrc) - These work best on Vercel
+    const primarySources: StreamSource[] = [
+      ...getAnilistEmbedSources(anilistId, episode, isMovie),
+    ];
 
-    // 1. MegaPlay via AniList ID (instant)
-    allSources.push(...getAnilistEmbedSources(anilistId, episode, isMovie));
-
-    // 2. Anikoto → MegaPlay internal ID (covers unmapped anime)
-    const anikotoPromise = fetch(
-      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
-    ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
-    // Try Anikoto API — gets real HiAnime episode IDs for best quality
-if (malId) {
-  try {
-    const res = await fetch(
-      `/api/anikoto?malId=${malId}&episode=${episode}&title=${encodeURIComponent(animeTitle)}`
-    );
-    const data = await res.json();
-    if (data.sources?.length) all.unshift(...data.sources);
-  } catch {}
-}
-
-    // 3. TMDB embeds
-    const tmdbPromise = fetch(
-      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&season=${season}&provider=tmdb${seasonYear ? `&year=${seasonYear}` : ""}`
-    ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
-
-    // 4. GogoAnime
-    const gogoPromise = fetch(
-      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
-    ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
-
-    // 5. AnimePahe
-    const pahePromise = fetch(
-      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
-    ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
-
-    // 6. IMDb/TMDB direct embeds
     if (imdbId || tmdbId) {
-      allSources.push(...getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie));
+      primarySources.push(...getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie));
     }
 
-    setSources([...allSources]);
+    // Set these immediately so the user doesn't see a blank screen
+    setSources(primarySources);
     setLoading(false);
 
-    const [anikoto, tmdb, gogo, pahe] = await Promise.all([
-      anikotoPromise, tmdbPromise, gogoPromise, pahePromise,
-    ]);
+    // 2. Secondary Sources (Custom API endpoints - can be slower or blocked by Vercel)
+    try {
+      // Anikoto via API
+      const anikotoPromise = fetch(
+        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
+      ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
 
-    setSources(prev => {
-      const combined = [...prev];
-      // Insert Anikoto after the 2 AniList embeds
-      if (anikoto.length) combined.splice(2, 0, ...anikoto);
-      if (tmdb.length) combined.push(...tmdb);
-      if (gogo.length) combined.push(...gogo);
-      if (pahe.length) combined.push(...pahe);
-      return combined;
-    });
+      // TMDB embeds via API
+      const tmdbPromise = fetch(
+        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&season=${season}&provider=tmdb${seasonYear ? `&year=${seasonYear}` : ""}`
+      ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
+
+      // GogoAnime via API
+      const gogoPromise = fetch(
+        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
+      ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
+
+      // AnimePahe via API
+      const pahePromise = fetch(
+        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
+      ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
+
+      const [anikoto, tmdb, gogo, pahe] = await Promise.all([
+        anikotoPromise, tmdbPromise, gogoPromise, pahePromise,
+      ]);
+
+      // Append these to existing sources
+      setSources(prev => {
+        const combined = [...prev];
+        if (anikoto.length) combined.push(...anikoto);
+        if (tmdb.length) combined.push(...tmdb);
+        if (gogo.length) combined.push(...gogo);
+        if (pahe.length) combined.push(...pahe);
+        return combined;
+      });
+    } catch (error) {
+      console.error("Error fetching secondary sources:", error);
+      // Don't change loading state, primary sources are already displayed
+    }
   }, [animeTitle, anilistId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
@@ -137,7 +133,6 @@ if (malId) {
       try {
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
 
-        // MegaPlay 404 / error detection
         if (
           data?.type === "error" ||
           data?.event === "error" ||
@@ -150,7 +145,6 @@ if (malId) {
           return;
         }
 
-        // Progress / completion
         if (data?.event === "complete") onEpisodeEnd?.();
         if (
           (data?.event === "time" && data.percent > 0.05) ||
