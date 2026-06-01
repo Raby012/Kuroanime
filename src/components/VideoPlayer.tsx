@@ -4,7 +4,6 @@ import type { StreamSource } from "@/lib/embed-sources";
 import {
   getEmbedSources,
   getAnilistEmbedSources,
-  getAutoEmbedSource,
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
@@ -53,29 +52,45 @@ export function VideoPlayer({
 
     const allSources: StreamSource[] = [];
 
-    // 1. MegaPlay — AniList ID direct (best, most reliable for anime)
-    const megaplaySources = getAnilistEmbedSources(anilistId, episode, isMovie);
-    allSources.push(...megaplaySources);
+    // 1. MegaPlay via AniList ID (instant, no API call needed)
+    const anilistEmbeds = getAnilistEmbedSources(anilistId, episode, isMovie);
+    allSources.push(...anilistEmbeds);
 
-    // 2. AutoEmbed — title slug based
-    const autoEmbeds = getAutoEmbedSource(animeTitle, seasonYear ?? null, episode);
-    allSources.push(...autoEmbeds);
+    // 2. Anikoto → MegaPlay via internal episode ID
+    // (covers anime not yet mapped to AniList ID on MegaPlay)
+    // Run in parallel with other fetches
+    const anikotoPromise = fetch(
+      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
+    )
+      .then((r) => r.json())
+      .then((data) => data.sources || [])
+      .catch(() => []);
 
-    // 3. TMDB-based embeds via server-side lookup
-    try {
-      const params = new URLSearchParams({
-        title: animeTitle,
-        episode: String(episode),
-        season: String(season),
-        provider: "tmdb",
-        ...(seasonYear ? { year: String(seasonYear) } : {}),
-      });
-      const res = await fetch(`/api/stream?${params}`);
-      const data = await res.json();
-      if (data.sources?.length) allSources.push(...data.sources);
-    } catch {}
+    // 3. TMDB-based embeds (good for popular/finished anime)
+    const tmdbPromise = fetch(
+      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&season=${season}&provider=tmdb${seasonYear ? `&year=${seasonYear}` : ""}`
+    )
+      .then((r) => r.json())
+      .then((data) => data.sources || [])
+      .catch(() => []);
 
-    // 4. IMDb/TMDB embeds from AniList external links
+    // 4. GogoAnime real m3u8
+    const gogoPromise = fetch(
+      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
+    )
+      .then((r) => r.json())
+      .then((data) => data.sources || [])
+      .catch(() => []);
+
+    // 5. AnimePahe real m3u8
+    const pahePromise = fetch(
+      `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
+    )
+      .then((r) => r.json())
+      .then((data) => data.sources || [])
+      .catch(() => []);
+
+    // 6. IMDb/TMDB direct embeds from AniList external links
     if (imdbId || tmdbId) {
       const embeds = getEmbedSources(
         imdbId ?? null,
@@ -87,46 +102,52 @@ export function VideoPlayer({
       allSources.push(...embeds);
     }
 
-    // 5. GogoAnime real m3u8
-    try {
-      const res = await fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
-      );
-      const data = await res.json();
-      if (data.sources?.length) allSources.push(...data.sources);
-    } catch {}
-
-    // 6. AnimePahe real m3u8
-    try {
-      const res = await fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
-      );
-      const data = await res.json();
-      if (data.sources?.length) allSources.push(...data.sources);
-    } catch {}
-
-    setSources(allSources);
+    // Set initial sources immediately (MegaPlay AniList + IMDb embeds)
+    // so player shows something right away
+    setSources([...allSources]);
     setLoading(false);
+
+    // Then resolve async sources and append
+    const [anikotoSources, tmdbSources, gogoSources, paheSources] =
+      await Promise.all([
+        anikotoPromise,
+        tmdbPromise,
+        gogoPromise,
+        pahePromise,
+      ]);
+
+    setSources((prev) => {
+      const combined = [...prev];
+
+      // Insert Anikoto sources after AniList embeds (index 2)
+      // to override failing AniList-mapped ones
+      if (anikotoSources.length) {
+        combined.splice(2, 0, ...anikotoSources);
+      }
+
+      if (tmdbSources.length) combined.push(...tmdbSources);
+      if (gogoSources.length) combined.push(...gogoSources);
+      if (paheSources.length) combined.push(...paheSources);
+
+      return combined;
+    });
   }, [animeTitle, anilistId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
   useEffect(() => {
     fetchSources();
   }, [fetchSources]);
 
-  // Load current source
+  // Load current source into player
   useEffect(() => {
     if (!sources.length) return;
     const src = sources[sourceIndex];
-    if (!src) {
-      setError(true);
-      return;
-    }
+    if (!src) { setError(true); return; }
     setProviderLabel(src.provider);
     setEmbedLoaded(false);
     if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
 
-  // Auto-advance embed after 10s if iframe didn't fire onLoad
+  // Auto-advance embed after 10s if iframe didn't load
   useEffect(() => {
     const src = sources[sourceIndex];
     if (!src || src.type !== "embed") return;
@@ -139,14 +160,19 @@ export function VideoPlayer({
     };
   }, [sourceIndex, sources, embedLoaded]);
 
-  // Listen for MegaPlay postMessage events
+  // Listen for MegaPlay postMessage events (episode end, progress)
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
         const data =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+          typeof event.data === "string"
+            ? JSON.parse(event.data)
+            : event.data;
         if (data?.event === "complete") onEpisodeEnd?.();
         if (data?.event === "time" && data.percent > 0.05) {
+          onProgress?.(episode);
+        }
+        if (data?.type === "watching-log" && data.currentTime > 30) {
           onProgress?.(episode);
         }
       } catch {}
