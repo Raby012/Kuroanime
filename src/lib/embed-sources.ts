@@ -14,23 +14,24 @@ export function getAnilistEmbedSources(
   const ep = isMovie ? 1 : episode;
   return [
     {
-      // MegaPlay Sub — try first
+      type: "embed",
+      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?dub=false&autoplay=true&primarycolor=E11D48`,
+      provider: "VidPlus Sub",
+    },
+    {
+      type: "embed",
+      url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?dub=true&autoplay=true&primarycolor=E11D48`,
+      provider: "VidPlus Dub",
+    },
+    {
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
       provider: "MegaPlay Sub",
     },
     {
-      // MegaPlay Dub — often works when Sub 404s
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`,
       provider: "MegaPlay Dub",
-    },
-    {
-      // MegaPlay using MAL ID via anilistId as fallback attempt
-      // (some titles only mapped by MAL on their side)
-      type: "embed",
-      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
-      provider: "MegaPlay Alt",
     },
   ];
 }
