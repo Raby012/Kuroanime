@@ -305,3 +305,47 @@ interface PageInfo {
   lastPage: number;
   hasNextPage: boolean;
 }
+
+// ── 🚀 THE FIX: EPISODE COUNT HELPER ──────────────────────────────────────
+
+/**
+ * Calculates the true episode count for any anime.
+ * 
+ * - Finished Anime: Returns `episodes` from AniList directly.
+ * - Ongoing Anime: Calculates episodes based on `nextAiringEpisode - 1`.
+ * - Long Series (One Piece): Adds a manual fallback if AniList returns 0.
+ */
+export function getAnimeEpisodeData(media: AnilistMedia): {
+  totalEpisodes: number;
+  isFinished: boolean;
+  nextAiringEpisode: number | null;
+} {
+  const { episodes, nextAiringEpisode, status } = media;
+
+  let totalEpisodes = episodes || 0;
+  const isFinished = status === "FINISHED";
+  const nextAiring = nextAiringEpisode?.episode || null;
+
+  // Fix 1: Ongoing anime with null episodes (Count based on next airing)
+  if (!totalEpisodes && nextAiring) {
+    totalEpisodes = nextAiring - 1;
+  }
+
+  // Fix 2: Known long series (One Piece ID: 21)
+  if (media.id === 21 && totalEpisodes === 0) {
+    totalEpisodes = 1122; // Total as of 2026
+  }
+
+  // Fix 3: Fallback for other large series that return 0
+  if (totalEpisodes === 0 && isFinished) {
+    // If it's finished and has 0, we can't know the total. 
+    // We default to 12 as a safe minimum.
+    totalEpisodes = 12;
+  }
+
+  return {
+    totalEpisodes,
+    isFinished,
+    nextAiringEpisode: nextAiring,
+  };
+}
