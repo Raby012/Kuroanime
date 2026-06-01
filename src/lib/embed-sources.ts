@@ -2,28 +2,80 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string }
   | { type: "embed"; url: string; provider: string };
 
+// ========================================
+// 1. MEGAPLAY ROTATION
+// ========================================
+const MEGAPLAY_DOMAINS = [
+  "megaplay.buzz",
+  "megaplay.nz",
+  "megaplay.cc",
+  "megaplay.icu",
+];
+
+function tryMegaPlayEmbed(
+  anilistId: number,
+  episode: number,
+  type: "sub" | "dub" = "sub"
+): StreamSource[] {
+  const sources: StreamSource[] = [];
+
+  for (const domain of MEGAPLAY_DOMAINS) {
+    if (type === "sub") {
+      sources.push({
+        type: "embed",
+        url: `https://${domain}/stream/ani/${anilistId}/${episode}/sub`,
+        provider: `MegaPlay (${domain}) Sub`,
+      });
+    } else if (type === "dub") {
+      sources.push({
+        type: "embed",
+        url: `https://${domain}/stream/ani/${anilistId}/${episode}/dub`,
+        provider: `MegaPlay (${domain}) Dub`,
+      });
+    }
+  }
+  return sources;
+}
+
+// ========================================
+// 2. ANILIST EMBED SOURCES (Main Function)
+// ========================================
 export function getAnilistEmbedSources(
   anilistId: number,
   episode: number,
   isMovie: boolean
 ): StreamSource[] {
   const ep = isMovie ? 1 : episode;
-  return [
-    {
-      type: "embed",
-      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
-      provider: "MegaPlay Sub",
-    },
-    {
-      type: "embed",
-      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`,
-      provider: "MegaPlay Dub",
-    },
-  ];
+  const sources: StreamSource[] = [];
+
+  // --- STEP 1: Try MegaPlay Sub & Dub with domain rotation ---
+  // MegaPlay Sub
+  sources.push(...tryMegaPlayEmbed(anilistId, ep, "sub"));
+  // MegaPlay Dub (This will often fail if Dub not released, but we try anyway)
+  sources.push(...tryMegaPlayEmbed(anilistId, ep, "dub"));
+
+  // --- STEP 2: FALLBACK TO VIDSRC (If MegaPlay completely fails) ---
+  // VidSrc Sub
+  sources.push({
+    type: "embed",
+    url: `https://vidsrc.cc/v2/embed/anime/${anilistId}/${ep}`,
+    provider: "VidSrc (Fallback)",
+  });
+  // VidSrc Dub (Optional, rarely works for recent anime but added for completeness)
+  sources.push({
+    type: "embed",
+    url: `https://vidsrc.fyi/embed/anime/${anilistId}/${ep}?dub=1`,
+    provider: "VidSrc Dub (Fallback)",
+  });
+
+  return sources;
 }
 
+// ========================================
+// 3. OTHER HELPERS (Kept for compatibility)
+// ========================================
 export function getAutoEmbedSource(): StreamSource[] {
-  return []; // dead domain
+  return []; // dead domain (left empty)
 }
 
 export function getEmbedSources(
