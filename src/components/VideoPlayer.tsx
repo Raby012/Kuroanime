@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
 import { getAnilistEmbedSources, getEmbedSources } from "@/lib/embed-sources";
-import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
 interface VideoPlayerProps {
   anilistId: number;
@@ -45,24 +45,24 @@ export function VideoPlayer({
 
     const all: StreamSource[] = [];
 
-    // 1. Anikoto API (HiAnime catalog — best quality)
+    // 1. Anikoto API — real HiAnime episode IDs (best quality)
     if (malId) {
       try {
         const res = await fetch(
-          `/api/anikoto?malId=${malId}&episode=${episode}`
+          `/api/anikoto?malId=${malId}&episode=${episode}&title=${encodeURIComponent(animeTitle)}`
         );
         const data = await res.json();
         if (data.sources?.length) all.push(...data.sources);
       } catch {}
     }
 
-    // 2. AniList ID based embeds (VidPlus + MegaPlay)
+    // 2. AniList ID embeds (VidPlus + MegaPlay)
     all.push(...getAnilistEmbedSources(anilistId, episode, isMovie));
 
-    // 3. IMDB/TMDB embeds
+    // 3. IMDB / TMDB embeds
     all.push(...getEmbedSources(imdbId || null, tmdbId || null, season, episode, isMovie));
 
-    // 4. GogoAnime via consumet (server-side)
+    // 4. GogoAnime via consumet (server-side, extra fallback)
     try {
       const res = await fetch(
         `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
@@ -166,11 +166,21 @@ export function VideoPlayer({
         )}
       </div>
 
-      {/* Source label + switcher */}
+      {/* Source info + switcher */}
       <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
-        <span className="text-xs text-gray-500">
-          Source: <span className="text-brand font-medium">{providerLabel}</span>
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">
+            Source: <span className="text-brand font-medium">{providerLabel}</span>
+          </span>
+          {sourceIndex < sources.length - 1 && (
+            <button
+              onClick={tryNextSource}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors"
+            >
+              Try next source <ChevronRight size={12} />
+            </button>
+          )}
+        </div>
         <div className="flex gap-1.5 flex-wrap">
           {sources.map((s, i) => (
             <button
