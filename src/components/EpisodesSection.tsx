@@ -76,6 +76,7 @@ export function EpisodesSection({
   return (
     <div className="w-full">
       <VideoPlayer
+        malId={malId}  
         animeTitle={animeTitle}
         anilistId={anilistId}
         episode={episode}
