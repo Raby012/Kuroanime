@@ -7,22 +7,23 @@ import toast from "react-hot-toast";
 const EPISODES_PER_PAGE = 100;
 
 interface EpisodesSectionProps {
-  malId?: number | null;  // add to interface
   animeTitle: string;
   anilistId: number;
+  malId?: number | null;
   totalEpisodes: number;
   isMovie: boolean;
   imdbId?: string | null;
-  seasonYear?: number | null;  // ← this was missing
+  seasonYear?: number | null;
 }
 
 export function EpisodesSection({
   animeTitle,
   anilistId,
+  malId,
   totalEpisodes,
   isMovie,
   imdbId,
-  seasonYear,  // ← this was missing
+  seasonYear,
 }: EpisodesSectionProps) {
   const [episode, setEpisode] = useState(1);
   const [page, setPage] = useState(0);
@@ -76,9 +77,9 @@ export function EpisodesSection({
   return (
     <div className="w-full">
       <VideoPlayer
-        malId={malId}  
         animeTitle={animeTitle}
         anilistId={anilistId}
+        malId={malId}
         episode={episode}
         imdbId={imdbId}
         isMovie={isMovie}
