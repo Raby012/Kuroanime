@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 const EPISODES_PER_PAGE = 100;
 
 interface EpisodesSectionProps {
+  malId?: number | null;  // add to interface
   animeTitle: string;
   anilistId: number;
   totalEpisodes: number;
