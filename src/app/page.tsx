@@ -1,4 +1,3 @@
-export const revalidate = 300; // refresh every 5 minutes
 import Link from "next/link";
 import Image from "next/image";
 import {
