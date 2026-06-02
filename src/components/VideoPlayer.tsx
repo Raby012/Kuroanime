@@ -1,15 +1,20 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { StreamSource } from "@/lib/embed-sources";
-import { getEmbedSources, getAnilistEmbedSources } from "@/lib/embed-sources";
+import {
+  getEmbedSources,
+  getAnilistEmbedSources,
+  getMalEmbedSources,
+} from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 
 interface VideoPlayerProps {
   animeTitle: string;
   anilistId: number;
+  malId?: number | null;
   episode: number;
   season?: number;
-  seasonYear?: number | null;  // ← was missing
+  seasonYear?: number | null;
   imdbId?: string | null;
   tmdbId?: number | null;
   isMovie?: boolean;
@@ -20,9 +25,10 @@ interface VideoPlayerProps {
 export function VideoPlayer({
   animeTitle,
   anilistId,
+  malId,
   episode,
   season = 1,
-  seasonYear,  // ← was missing
+  seasonYear,
   imdbId,
   tmdbId,
   isMovie = false,
@@ -52,35 +58,41 @@ export function VideoPlayer({
 
     const allSources: StreamSource[] = [];
 
-    // 1. MegaPlay via AniList ID (instant)
+    // 1. MegaPlay via AniList ID (instant, best for anime)
     allSources.push(...getAnilistEmbedSources(anilistId, episode, isMovie));
 
-    // 2. IMDb/TMDB direct embeds
+    // 2. VidSrc via MAL ID (instant, no API needed, auto-fallback)
+    if (malId) {
+      allSources.push(...getMalEmbedSources(malId, episode, isMovie));
+    }
+
+    // 3. IMDb/TMDB direct embeds if available
     if (imdbId || tmdbId) {
       allSources.push(
         ...getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
       );
     }
 
+    // Set immediately so player shows sources right away
     setSources([...allSources]);
     setLoading(false);
 
-    // 3. Anikoto → MegaPlay internal ID
+    // 4. Anikoto → MegaPlay internal ID (async, covers unmapped anime)
     const anikotoPromise = fetch(
       `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
     ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
 
-    // 4. TMDB embeds via server lookup
+    // 5. TMDB embeds via server-side title search (async)
     const tmdbPromise = fetch(
       `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&season=${season}&provider=tmdb${seasonYear ? `&year=${seasonYear}` : ""}`
     ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
 
-    // 5. GogoAnime
+    // 6. GogoAnime real m3u8 (async)
     const gogoPromise = fetch(
       `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
     ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
 
-    // 6. AnimePahe
+    // 7. AnimePahe real m3u8 (async)
     const pahePromise = fetch(
       `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
     ).then(r => r.json()).then(d => d.sources || []).catch(() => []);
@@ -91,13 +103,14 @@ export function VideoPlayer({
 
     setSources(prev => {
       const combined = [...prev];
+      // Insert Anikoto after MegaPlay sources (index 2)
       if (anikoto.length) combined.splice(2, 0, ...anikoto);
       if (tmdb.length) combined.push(...tmdb);
       if (gogo.length) combined.push(...gogo);
       if (pahe.length) combined.push(...pahe);
       return combined;
     });
-  }, [animeTitle, anilistId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
+  }, [animeTitle, anilistId, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
@@ -111,6 +124,7 @@ export function VideoPlayer({
     if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   }, [sources, sourceIndex]);
 
+  // Auto-advance embed after 12s if not loaded
   useEffect(() => {
     const src = sources[sourceIndex];
     if (!src || src.type !== "embed") return;
@@ -121,11 +135,19 @@ export function VideoPlayer({
     return () => { if (embedTimerRef.current) clearTimeout(embedTimerRef.current); };
   }, [sourceIndex, sources, embedLoaded, embedError]);
 
+  // Listen for player messages (errors, progress, completion)
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
-        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (data?.type === "error" || data?.event === "error" || data?.status === 404 || data?.error) {
+        const data = typeof event.data === "string"
+          ? JSON.parse(event.data)
+          : event.data;
+        if (
+          data?.type === "error" ||
+          data?.event === "error" ||
+          data?.status === 404 ||
+          data?.error
+        ) {
           setEmbedError(true);
           setTimeout(() => tryNextSource(), 1000);
           return;
