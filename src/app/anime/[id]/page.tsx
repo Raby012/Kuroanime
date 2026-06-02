@@ -216,6 +216,7 @@ export default async function AnimePage({ params }: { params: { id: string } }) 
         {totalEpisodes > 0 ? (
           <div className="mt-8 sm:mt-10">
             <EpisodesSection
+              malId={anime.idMal} 
               animeTitle={title}
               anilistId={anime.id}
               totalEpisodes={totalEpisodes}
