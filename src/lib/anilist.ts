@@ -1,6 +1,5 @@
 const ANILIST_URL = "https://graphql.anilist.co";
 
-// Cache for 15 minutes by default — auto-updates episode/season data
 const DEFAULT_REVALIDATE = 900;
 
 const MEDIA_FIELDS = `
@@ -77,13 +76,10 @@ export async function getSeasonalAnime(season?: string, year?: number) {
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentSeason =
-    currentMonth <= 3
-      ? "WINTER"
-      : currentMonth <= 6
-      ? "SPRING"
-      : currentMonth <= 9
-      ? "SUMMER"
-      : "FALL";
+    currentMonth <= 3 ? "WINTER"
+    : currentMonth <= 6 ? "SPRING"
+    : currentMonth <= 9 ? "SUMMER"
+    : "FALL";
 
   const q = `
     query ($season: MediaSeason, $year: Int, $page: Int, $perPage: Int) {
@@ -96,13 +92,7 @@ export async function getSeasonalAnime(season?: string, year?: number) {
   `;
   const data = await query<{ Page: { media: AnilistMedia[] } }>(
     q,
-    {
-      season: season || currentSeason,
-      year: year || now.getFullYear(),
-      page: 1,
-      perPage: 20,
-    },
-    // Seasonal data changes less often
+    { season: season || currentSeason, year: year || now.getFullYear(), page: 1, perPage: 20 },
     3600
   );
   return data.Page.media;
@@ -120,9 +110,7 @@ export async function searchAnime(search: string, page = 1, perPage = 20) {
     }
   `;
   const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
-    q,
-    { search, page, perPage },
-    60 // Search results: 1 minute cache
+    q, { search, page, perPage }, 60
   );
   return data.Page;
 }
@@ -133,7 +121,11 @@ export async function getAnimeById(id: number) {
       Media(id: $id, type: ANIME) {
         ${MEDIA_FIELDS}
         recommendations(perPage: 8, sort: RATING_DESC) {
-          nodes { mediaRecommendation { id title { userPreferred } coverImage { large } format } }
+          nodes {
+            mediaRecommendation {
+              id title { userPreferred } coverImage { large } format
+            }
+          }
         }
       }
     }
@@ -141,8 +133,7 @@ export async function getAnimeById(id: number) {
   const data = await query<{ Media: AnilistMedia }>(
     q,
     { id },
-    // Individual anime pages: 15 min (episode count updates)
-    900
+    300 // 5 min — keeps episode counts fresh for airing anime
   );
   return data.Media;
 }
@@ -169,9 +160,7 @@ export async function getTopAnime(page = 1, perPage = 50) {
     }
   `;
   const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
-    q,
-    { page, perPage },
-    3600
+    q, { page, perPage }, 3600
   );
   return data.Page;
 }
@@ -188,16 +177,13 @@ export async function getAnimeByGenre(genre: string, page = 1, perPage = 30) {
     }
   `;
   const data = await query<{ Page: { pageInfo: PageInfo; media: AnilistMedia[] } }>(
-    q,
-    { genre, page, perPage },
-    3600
+    q, { genre, page, perPage }, 3600
   );
   return data.Page;
 }
 
 export async function getAiringSchedule() {
   const now = Math.floor(Date.now() / 1000);
-  // Show episodes aired in last 48h AND upcoming 7 days
   const twoDaysAgo = now - 2 * 24 * 60 * 60;
   const weekLater = now + 7 * 24 * 60 * 60;
 
@@ -209,18 +195,14 @@ export async function getAiringSchedule() {
           media {
             id title { english romaji }
             coverImage { large medium }
-            format episodes
-            status
+            format episodes status
           }
         }
       }
     }
   `;
   const data = await query<{ Page: { airingSchedules: AiringSchedule[] } }>(
-    q,
-    { from: twoDaysAgo, to: weekLater },
-    // Airing schedule: refresh every 5 minutes
-    300
+    q, { from: twoDaysAgo, to: weekLater }, 300
   );
   return data.Page.airingSchedules;
 }
@@ -304,48 +286,4 @@ interface PageInfo {
   currentPage: number;
   lastPage: number;
   hasNextPage: boolean;
-}
-
-// ── 🚀 THE FIX: EPISODE COUNT HELPER ──────────────────────────────────────
-
-/**
- * Calculates the true episode count for any anime.
- * 
- * - Finished Anime: Returns `episodes` from AniList directly.
- * - Ongoing Anime: Calculates episodes based on `nextAiringEpisode - 1`.
- * - Long Series (One Piece): Adds a manual fallback if AniList returns 0.
- */
-export function getAnimeEpisodeData(media: AnilistMedia): {
-  totalEpisodes: number;
-  isFinished: boolean;
-  nextAiringEpisode: number | null;
-} {
-  const { episodes, nextAiringEpisode, status } = media;
-
-  let totalEpisodes = episodes || 0;
-  const isFinished = status === "FINISHED";
-  const nextAiring = nextAiringEpisode?.episode || null;
-
-  // Fix 1: Ongoing anime with null episodes (Count based on next airing)
-  if (!totalEpisodes && nextAiring) {
-    totalEpisodes = nextAiring - 1;
-  }
-
-  // Fix 2: Known long series (One Piece ID: 21)
-  if (media.id === 21 && totalEpisodes === 0) {
-    totalEpisodes = 1122; // Total as of 2026
-  }
-
-  // Fix 3: Fallback for other large series that return 0
-  if (totalEpisodes === 0 && isFinished) {
-    // If it's finished and has 0, we can't know the total. 
-    // We default to 12 as a safe minimum.
-    totalEpisodes = 12;
-  }
-
-  return {
-    totalEpisodes,
-    isFinished,
-    nextAiringEpisode: nextAiring,
-  };
 }
