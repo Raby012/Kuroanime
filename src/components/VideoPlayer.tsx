@@ -97,7 +97,14 @@ export function VideoPlayer({
     setLoading(false);
 
     // 5. Async sources (all parallel)
-    const [hianime, anikoto, tmdb, gogo, pahe] = await Promise.all([
+    // Parallel async fetches — add VidAPI for regional
+const [hianime, anikoto, tmdb, gogo, pahe, vidapiHindi, vidapiTamil, vidapiTelugu] = await Promise.all([
+     fetch(`/api/vidapi?title=${encodeURIComponent(animeTitle)}&episode=${episode}&lang=hindi`)
+      .then(r => r.json()).then(d => d.sources || []).catch(() => []),
+     fetch(`/api/vidapi?title=${encodeURIComponent(animeTitle)}&episode=${episode}&lang=tamil`)
+      .then(r => r.json()).then(d => d.sources || []).catch(() => []),
+     fetch(`/api/vidapi?title=${encodeURIComponent(animeTitle)}&episode=${episode}&lang=telugu`)
+       .then(r => r.json()).then(d => d.sources || []).catch(() => []),
       fetch(`/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=hianime`)
         .then(r => r.json()).then(d => (d.sources || []).map((s: StreamSource) => ({ ...s, lang: s.provider?.toLowerCase().includes("dub") ? "dub" : "sub" }))).catch(() => []),
       fetch(`/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`)
