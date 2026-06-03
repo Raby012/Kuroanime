@@ -15,6 +15,12 @@ export function getAnilistEmbedSources(
   return [
     {
       type: "embed",
+      url: `https://vidapi.xyz/embed/anime/${anilistId}/${episode}?lang=${langCode}`,
+      provider: `VidAPI ${lang.charAt(0).toUpperCase() + lang.slice(1)}`,
+      lang,
+    },
+    {
+      type: "embed",
       url: `https://player.vidplus.to/embed/anime/${anilistId}/${ep}?dub=false&autoplay=true&primarycolor=E11D48`,
       provider: "VidPlus Sub",
       lang: "sub",
