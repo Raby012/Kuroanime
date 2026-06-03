@@ -14,7 +14,10 @@ const ANIKOTO_API = "https://anikoto-six.vercel.app";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function bestMatch(results: { id: string; title: string }[], title: string) {
+function bestMatch(
+  results: { id: string; title: string }[],
+  title: string
+) {
   const clean = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
   const target = clean(title);
@@ -34,25 +37,22 @@ function bestMatch(results: { id: string; title: string }[], title: string) {
   return best;
 }
 
-// ── Anikoto API (real m3u8 streams) ───────────────────────────────────────
-// GET /api/search?keyword={title} → results[].id (slug)
-// GET /api/watch/{slug}?ep={episode} → sources[].url + proxyUrl + tracks
+// ── Anikoto API → real m3u8 ────────────────────────────────────────────────
+
+interface AnikotoSource {
+  type: "m3u8";
+  url: string;
+  provider: string;
+  lang: string;
+  subtitles?: { url: string; lang: string }[];
+}
 
 async function getAnikotoStream(
   title: string,
   episode: number,
-  category: "sub" | "dub" = "sub"
-): Promise
-  {
-    type: "m3u8";
-    url: string;
-    provider: string;
-    lang: string;
-    subtitles?: { url: string; lang: string }[];
-  }[]
-> {
+  category: "sub" | "dub"
+): Promise<AnikotoSource[]> {
   try {
-    // Step 1: Search
     const searchRes = await fetch(
       `${ANIKOTO_API}/api/search?keyword=${encodeURIComponent(title)}`,
       { next: { revalidate: 3600 } }
@@ -67,7 +67,6 @@ async function getAnikotoStream(
       [];
     if (!results.length) return [];
 
-    // Find best match
     const clean = (s: string) =>
       s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
     const target = clean(title);
@@ -77,14 +76,14 @@ async function getAnikotoStream(
       const candidate = clean(r.name || r.title || "");
       if (candidate === target) { best = r; break; }
       const words = target.split(" ");
-      const score = words.filter((w: string) => candidate.includes(w)).length / words.length;
+      const score =
+        words.filter((w: string) => candidate.includes(w)).length / words.length;
       if (score > bestScore) { bestScore = score; best = r; }
     }
 
     const slug = best.id || best.slug;
     if (!slug) return [];
 
-    // Step 2: Get stream using /api/watch/{slug}?ep={episode}
     const watchRes = await fetch(
       `${ANIKOTO_API}/api/watch/${slug}?ep=${episode}`,
       { next: { revalidate: 300 } }
@@ -92,44 +91,30 @@ async function getAnikotoStream(
     if (!watchRes.ok) return [];
     const watchData = await watchRes.json();
 
-    // Response shape: { sources: [{url, isM3U8, quality}], tracks: [{file, label, kind}], proxyUrl }
-    const rawSources: {
-      url?: string;
-      isM3U8?: boolean;
-      quality?: string;
-      type?: string;
-    }[] = watchData?.sources || watchData?.data?.sources || [];
+    const rawSources: { url?: string; isM3U8?: boolean; quality?: string }[] =
+      watchData?.sources || watchData?.data?.sources || [];
 
     const tracks: { file?: string; src?: string; label?: string; kind?: string }[] =
       watchData?.tracks || watchData?.data?.tracks || [];
 
     const subtitles = tracks
       .filter((t) => t.kind === "captions" || t.kind === "subtitles")
-      .map((t) => ({
-        url: t.file || t.src || "",
-        lang: t.label || "Unknown",
-      }))
+      .map((t) => ({ url: t.file || t.src || "", lang: t.label || "Unknown" }))
       .filter((t) => t.url);
 
     const proxyBase: string = watchData?.proxyUrl || "";
 
-    const sources = rawSources
+    return rawSources
       .filter((s) => s.url && (s.isM3U8 || s.url.includes(".m3u8")))
-      .map((s) => {
-        // Use proxyUrl if available to avoid CORS issues
-        const streamUrl = proxyBase
+      .map((s) => ({
+        type: "m3u8" as const,
+        url: proxyBase
           ? `${proxyBase}${encodeURIComponent(s.url!)}`
-          : s.url!;
-        return {
-          type: "m3u8" as const,
-          url: streamUrl,
-          provider: `Anikoto ${category === "sub" ? "Sub" : "Dub"} (${s.quality || "HD"})`,
-          lang: category,
-          subtitles,
-        };
-      });
-
-    return sources;
+          : s.url!,
+        provider: `Anikoto ${category === "sub" ? "Sub" : "Dub"} (${s.quality || "HD"})`,
+        lang: category,
+        subtitles,
+      }));
   } catch (e) {
     console.error("Anikoto stream error:", e);
     return [];
@@ -138,16 +123,18 @@ async function getAnikotoStream(
 
 // ── HiAnime API ────────────────────────────────────────────────────────────
 
-async function getHiAnimeStream(
-  title: string,
-  episode: number
-): Promise<{
+interface HiAnimeSource {
   type: "m3u8";
   url: string;
   provider: string;
   lang: string;
   subtitles?: { url: string; lang: string }[];
-}[]> {
+}
+
+async function getHiAnimeStream(
+  title: string,
+  episode: number
+): Promise<HiAnimeSource[]> {
   try {
     const searchRes = await fetch(
       `${HIANIME_API}/api/search?keyword=${encodeURIComponent(title)}`,
@@ -172,7 +159,8 @@ async function getHiAnimeStream(
       const candidate = clean(a.name || a.title || "");
       if (candidate === target) { best = a; break; }
       const words = target.split(" ");
-      const score = words.filter((w: string) => candidate.includes(w)).length / words.length;
+      const score =
+        words.filter((w: string) => candidate.includes(w)).length / words.length;
       if (score > bestScore) { bestScore = score; best = a; }
     }
 
@@ -190,19 +178,14 @@ async function getHiAnimeStream(
       [];
     if (!episodes.length) return [];
 
-    const ep = episodes.find((e) => e.number === episode) || episodes[episode - 1];
+    const ep =
+      episodes.find((e) => e.number === episode) || episodes[episode - 1];
     if (!ep) return [];
 
     const episodeId = ep.episodeId || ep.id;
     if (!episodeId) return [];
 
-    const sources: {
-      type: "m3u8";
-      url: string;
-      provider: string;
-      lang: string;
-      subtitles?: { url: string; lang: string }[];
-    }[] = [];
+    const sources: HiAnimeSource[] = [];
 
     for (const category of ["sub", "dub"] as const) {
       try {
@@ -218,23 +201,25 @@ async function getHiAnimeStream(
           srcData?.sources?.[0]?.url ||
           srcData?.data?.sources?.[0]?.url;
 
-        if (link) {
-          const subtitles = (srcData?.tracks || srcData?.subtitles || [])
-            .filter((t: { kind?: string }) => t.kind === "captions" || t.kind === "subtitles")
-            .map((t: { file?: string; label?: string }) => ({
-              url: t.file || "",
-              lang: t.label || "Unknown",
-            }))
-            .filter((t: { url: string }) => t.url);
+        if (!link) continue;
 
-          sources.push({
-            type: "m3u8",
-            url: link,
-            provider: `HiAnime ${category === "sub" ? "Sub" : "Dub"}`,
-            lang: category,
-            subtitles,
-          });
-        }
+        const subtitles = (srcData?.tracks || srcData?.subtitles || [])
+          .filter((t: { kind?: string }) =>
+            t.kind === "captions" || t.kind === "subtitles"
+          )
+          .map((t: { file?: string; label?: string }) => ({
+            url: t.file || "",
+            lang: t.label || "Unknown",
+          }))
+          .filter((t: { url: string }) => t.url);
+
+        sources.push({
+          type: "m3u8",
+          url: link,
+          provider: `HiAnime ${category === "sub" ? "Sub" : "Dub"}`,
+          lang: category,
+          subtitles,
+        });
       } catch {}
     }
 
@@ -285,7 +270,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
-  // ── Anikoto (real m3u8, best coverage) ───────────────────────────────
+  // ── Anikoto ───────────────────────────────────────────────────────────
   if (provider === "anikoto") {
     const [sub, dub] = await Promise.all([
       getAnikotoStream(title, episode, "sub"),
@@ -300,21 +285,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sources });
   }
 
-  // ── TMDB embeds ───────────────────────────────────────────────────────
+  // ── TMDB — sub + Indian dubs via LetsEmbed ────────────────────────────
   if (provider === "tmdb") {
     const tmdbId = await getTmdbIdByTitle(title, year);
     if (!tmdbId) return NextResponse.json({ sources: [] });
 
     const sources = [
-      { type: "embed", url: `https://superembed.stream/embed/tmdb/${tmdbId}/${season}/${episode}`, provider: "SuperEmbed", lang: "sub" },
-      { type: "embed", url: `https://autoembed.cc/embed/tmdb/${tmdbId}/tv/${season}/${episode}`, provider: "AutoEmbed", lang: "sub" },
+      // Sub sources
       { type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc CC", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc ICU", lang: "sub" },
       { type: "embed", url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc", lang: "sub" },
       { type: "embed", url: `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc FYI", lang: "sub" },
       { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" },
+      { type: "embed", url: `https://superembed.stream/embed/tmdb/${tmdbId}/${season}/${episode}`, provider: "SuperEmbed", lang: "sub" },
+      { type: "embed", url: `https://autoembed.cc/embed/tmdb/${tmdbId}/tv/${season}/${episode}`, provider: "AutoEmbed", lang: "sub" },
+      { type: "embed", url: `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc ICU", lang: "sub" },
       { type: "embed", url: `https://player.videasy.net/embed/tv/${tmdbId}/${season}/${episode}`, provider: "Videasy", lang: "sub" },
+      { type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" },
+      // Hindi dub via LetsEmbed (real API, supports Indian languages)
+      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=hi`, provider: "LetsEmbed Hindi", lang: "hindi" },
+      // Tamil dub
+      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=ta`, provider: "LetsEmbed Tamil", lang: "tamil" },
+      // Telugu dub
+      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=te`, provider: "LetsEmbed Telugu", lang: "telugu" },
     ];
+
     return NextResponse.json({ sources, tmdbId });
   }
 
@@ -353,7 +347,8 @@ export async function GET(req: NextRequest) {
 
     const match = bestMatch(results, title);
     const episodes = await getGogoanimeEpisodes(match.id);
-    const ep = episodes.find((e) => e.number === episode) || episodes[episode - 1];
+    const ep =
+      episodes.find((e) => e.number === episode) || episodes[episode - 1];
     if (!ep) return NextResponse.json({ sources: [] });
 
     const sources = await getGogoanimeStream(ep.id);
