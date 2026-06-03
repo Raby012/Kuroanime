@@ -10,6 +10,7 @@ import {
 export const runtime = "nodejs";
 
 const HIANIME_API = "https://hi-anime-api-silk.vercel.app";
+const ANIKOTO_API = "https://anikoto-six.vercel.app";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -23,23 +24,131 @@ function bestMatch(results: { id: string; title: string }[], title: string) {
     const candidate = clean(r.title);
     if (candidate === target) return r;
     const words = target.split(" ");
-    const score = words.filter((w) => candidate.includes(w)).length / words.length;
-    if (score > bestScore) { bestScore = score; best = r; }
+    const score =
+      words.filter((w) => candidate.includes(w)).length / words.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
+    }
   }
   return best;
 }
 
-// ── HiAnime API (your self-hosted) ────────────────────────────────────────
-// Uses JustAnimeCore format:
-// GET /api/anime/{slug}  → episodes[]
-// GET /api/episode-srcs?id={episodeId}&server=megacloud&category=sub|dub
+// ── Anikoto API (real m3u8 streams) ───────────────────────────────────────
+// GET /api/search?keyword={title} → results[].id (slug)
+// GET /api/watch/{slug}?ep={episode} → sources[].url + proxyUrl + tracks
+
+async function getAnikotoStream(
+  title: string,
+  episode: number,
+  category: "sub" | "dub" = "sub"
+): Promise
+  {
+    type: "m3u8";
+    url: string;
+    provider: string;
+    lang: string;
+    subtitles?: { url: string; lang: string }[];
+  }[]
+> {
+  try {
+    // Step 1: Search
+    const searchRes = await fetch(
+      `${ANIKOTO_API}/api/search?keyword=${encodeURIComponent(title)}`,
+      { next: { revalidate: 3600 } }
+    );
+    if (!searchRes.ok) return [];
+    const searchData = await searchRes.json();
+
+    const results: { id?: string; slug?: string; name?: string; title?: string }[] =
+      searchData?.results ||
+      searchData?.data ||
+      searchData?.animes ||
+      [];
+    if (!results.length) return [];
+
+    // Find best match
+    const clean = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    const target = clean(title);
+    let best = results[0];
+    let bestScore = 0;
+    for (const r of results) {
+      const candidate = clean(r.name || r.title || "");
+      if (candidate === target) { best = r; break; }
+      const words = target.split(" ");
+      const score = words.filter((w: string) => candidate.includes(w)).length / words.length;
+      if (score > bestScore) { bestScore = score; best = r; }
+    }
+
+    const slug = best.id || best.slug;
+    if (!slug) return [];
+
+    // Step 2: Get stream using /api/watch/{slug}?ep={episode}
+    const watchRes = await fetch(
+      `${ANIKOTO_API}/api/watch/${slug}?ep=${episode}`,
+      { next: { revalidate: 300 } }
+    );
+    if (!watchRes.ok) return [];
+    const watchData = await watchRes.json();
+
+    // Response shape: { sources: [{url, isM3U8, quality}], tracks: [{file, label, kind}], proxyUrl }
+    const rawSources: {
+      url?: string;
+      isM3U8?: boolean;
+      quality?: string;
+      type?: string;
+    }[] = watchData?.sources || watchData?.data?.sources || [];
+
+    const tracks: { file?: string; src?: string; label?: string; kind?: string }[] =
+      watchData?.tracks || watchData?.data?.tracks || [];
+
+    const subtitles = tracks
+      .filter((t) => t.kind === "captions" || t.kind === "subtitles")
+      .map((t) => ({
+        url: t.file || t.src || "",
+        lang: t.label || "Unknown",
+      }))
+      .filter((t) => t.url);
+
+    const proxyBase: string = watchData?.proxyUrl || "";
+
+    const sources = rawSources
+      .filter((s) => s.url && (s.isM3U8 || s.url.includes(".m3u8")))
+      .map((s) => {
+        // Use proxyUrl if available to avoid CORS issues
+        const streamUrl = proxyBase
+          ? `${proxyBase}${encodeURIComponent(s.url!)}`
+          : s.url!;
+        return {
+          type: "m3u8" as const,
+          url: streamUrl,
+          provider: `Anikoto ${category === "sub" ? "Sub" : "Dub"} (${s.quality || "HD"})`,
+          lang: category,
+          subtitles,
+        };
+      });
+
+    return sources;
+  } catch (e) {
+    console.error("Anikoto stream error:", e);
+    return [];
+  }
+}
+
+// ── HiAnime API ────────────────────────────────────────────────────────────
 
 async function getHiAnimeStream(
   title: string,
   episode: number
-): Promise<{ url: string; provider: string; type: "m3u8"; subtitles?: { url: string; lang: string }[] }[]> {
+): Promise<{
+  type: "m3u8";
+  url: string;
+  provider: string;
+  lang: string;
+  subtitles?: { url: string; lang: string }[];
+}[]> {
   try {
-    // Step 1: Search for the anime
     const searchRes = await fetch(
       `${HIANIME_API}/api/search?keyword=${encodeURIComponent(title)}`,
       { next: { revalidate: 3600 } }
@@ -47,7 +156,6 @@ async function getHiAnimeStream(
     if (!searchRes.ok) return [];
     const searchData = await searchRes.json();
 
-    // Handle both possible response shapes
     const animes: { id: string; name?: string; title?: string }[] =
       searchData?.results ||
       searchData?.animes ||
@@ -55,8 +163,8 @@ async function getHiAnimeStream(
       [];
     if (!animes.length) return [];
 
-    // Find best title match
-    const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    const clean = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
     const target = clean(title);
     let best = animes[0];
     let bestScore = 0;
@@ -68,7 +176,6 @@ async function getHiAnimeStream(
       if (score > bestScore) { bestScore = score; best = a; }
     }
 
-    // Step 2: Get anime episodes using slug ID
     const animeRes = await fetch(
       `${HIANIME_API}/api/anime/${best.id}`,
       { next: { revalidate: 300 } }
@@ -83,18 +190,21 @@ async function getHiAnimeStream(
       [];
     if (!episodes.length) return [];
 
-    const ep =
-      episodes.find((e) => e.number === episode) ||
-      episodes[episode - 1];
+    const ep = episodes.find((e) => e.number === episode) || episodes[episode - 1];
     if (!ep) return [];
 
     const episodeId = ep.episodeId || ep.id;
     if (!episodeId) return [];
 
-    // Step 3: Get streams for sub and dub
-    const sources: { url: string; provider: string; type: "m3u8"; subtitles?: { url: string; lang: string }[] }[] = [];
+    const sources: {
+      type: "m3u8";
+      url: string;
+      provider: string;
+      lang: string;
+      subtitles?: { url: string; lang: string }[];
+    }[] = [];
 
-    for (const category of ["sub", "dub"]) {
+    for (const category of ["sub", "dub"] as const) {
       try {
         const srcRes = await fetch(
           `${HIANIME_API}/api/episode-srcs?id=${episodeId}&server=megacloud&category=${category}`,
@@ -108,19 +218,12 @@ async function getHiAnimeStream(
           srcData?.sources?.[0]?.url ||
           srcData?.data?.sources?.[0]?.url;
 
-        if (link && (link.includes(".m3u8") || link.startsWith("http"))) {
-          const subtitles = (
-            srcData?.tracks ||
-            srcData?.subtitles ||
-            srcData?.data?.tracks ||
-            []
-          )
-            .filter((t: { kind?: string; file?: string; label?: string }) =>
-              t.kind === "captions" || t.kind === "subtitles"
-            )
-            .map((t: { file?: string; label?: string; src?: string; language?: string }) => ({
-              url: t.file || t.src || "",
-              lang: t.label || t.language || "Unknown",
+        if (link) {
+          const subtitles = (srcData?.tracks || srcData?.subtitles || [])
+            .filter((t: { kind?: string }) => t.kind === "captions" || t.kind === "subtitles")
+            .map((t: { file?: string; label?: string }) => ({
+              url: t.file || "",
+              lang: t.label || "Unknown",
             }))
             .filter((t: { url: string }) => t.url);
 
@@ -128,6 +231,7 @@ async function getHiAnimeStream(
             type: "m3u8",
             url: link,
             provider: `HiAnime ${category === "sub" ? "Sub" : "Dub"}`,
+            lang: category,
             subtitles,
           });
         }
@@ -138,69 +242,6 @@ async function getHiAnimeStream(
   } catch (e) {
     console.error("HiAnime API error:", e);
     return [];
-  }
-}
-
-// ── Anikoto → MegaPlay ────────────────────────────────────────────────────
-
-async function getAnikotoEpisodeId(
-  title: string,
-  episode: number
-): Promise<string | null> {
-  try {
-    const searchRes = await fetch(
-      `https://anikotoapi.site/search?q=${encodeURIComponent(title)}`,
-      { next: { revalidate: 3600 } }
-    );
-    if (!searchRes.ok) return null;
-    const searchData = await searchRes.json();
-    const results: {
-      id?: string | number;
-      slug?: string;
-      title?: string;
-      name?: string;
-    }[] = searchData?.results || searchData?.data || searchData?.anime || [];
-    if (!results.length) return null;
-
-    const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
-    const target = clean(title);
-    let best = results[0];
-    let bestScore = 0;
-    for (const s of results) {
-      const candidate = clean(s.title || s.name || "");
-      if (candidate === target) { best = s; break; }
-      const words = target.split(" ");
-      const score = words.filter((w) => candidate.includes(w)).length / words.length;
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-
-    const seriesId = best.id || best.slug;
-    if (!seriesId) return null;
-
-    const epRes = await fetch(
-      `https://anikotoapi.site/series/${seriesId}`,
-      { next: { revalidate: 300 } }
-    );
-    if (!epRes.ok) return null;
-    const epData = await epRes.json();
-    const episodes: {
-      number?: number;
-      episode_number?: number;
-      ep?: number;
-      episode_embed_id?: string | number;
-      embed_id?: string | number;
-    }[] = epData?.episodes || epData?.data?.episodes || epData?.episode_list || [];
-    if (!episodes.length) return null;
-
-    const ep =
-      episodes.find((e) =>
-        e.number === episode || e.episode_number === episode || e.ep === episode
-      ) || episodes[episode - 1];
-
-    return ep?.episode_embed_id?.toString() || ep?.embed_id?.toString() || null;
-  } catch (e) {
-    console.error("Anikoto error:", e);
-    return null;
   }
 }
 
@@ -244,105 +285,36 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
-  // ── HiAnime (real m3u8 streams) ───────────────────────────────────────
+  // ── Anikoto (real m3u8, best coverage) ───────────────────────────────
+  if (provider === "anikoto") {
+    const [sub, dub] = await Promise.all([
+      getAnikotoStream(title, episode, "sub"),
+      getAnikotoStream(title, episode, "dub"),
+    ]);
+    return NextResponse.json({ sources: [...sub, ...dub] });
+  }
+
+  // ── HiAnime ───────────────────────────────────────────────────────────
   if (provider === "hianime") {
     const sources = await getHiAnimeStream(title, episode);
     return NextResponse.json({ sources });
   }
 
-  // ── Anikoto → MegaPlay ────────────────────────────────────────────────
-  if (provider === "anikoto") {
-    const embedId = await getAnikotoEpisodeId(title, episode);
-    if (!embedId) return NextResponse.json({ sources: [] });
-    return NextResponse.json({
-      sources: [
-        {
-          type: "embed",
-          url: `https://megaplay.buzz/stream/s-2/${embedId}/sub`,
-          provider: "MegaPlay Sub",
-        },
-        {
-          type: "embed",
-          url: `https://megaplay.buzz/stream/s-2/${embedId}/dub`,
-          provider: "MegaPlay Dub",
-        },
-      ],
-    });
-  }
-
-  // ── TMDB embeds — all providers ───────────────────────────────────────
+  // ── TMDB embeds ───────────────────────────────────────────────────────
   if (provider === "tmdb") {
     const tmdbId = await getTmdbIdByTitle(title, year);
     if (!tmdbId) return NextResponse.json({ sources: [] });
 
-    const isMovie = false; // TV for anime
     const sources = [
-      // SuperEmbed
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://superembed.stream/embed/tmdb/${tmdbId}`
-          : `https://superembed.stream/embed/tmdb/${tmdbId}/${season}/${episode}`,
-        provider: "SuperEmbed",
-      },
-      // AutoEmbed
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://autoembed.cc/embed/tmdb/${tmdbId}/movie`
-          : `https://autoembed.cc/embed/tmdb/${tmdbId}/tv/${season}/${episode}`,
-        provider: "AutoEmbed",
-      },
-      // VidSrc CC
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://vidsrc.cc/v2/embed/movie/${tmdbId}`
-          : `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc CC",
-      },
-      // VidSrc ICU
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://vidsrc.icu/embed/movie/${tmdbId}`
-          : `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc ICU",
-      },
-      // VidSrc.to
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://vidsrc.to/embed/movie/${tmdbId}`
-          : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc",
-      },
-      // VidSrc FYI
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://vidsrc.fyi/embed/movie/${tmdbId}`
-          : `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidSrc FYI",
-      },
-      // VidLink
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://vidlink.pro/movie/${tmdbId}`
-          : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
-        provider: "VidLink",
-      },
-      // Videasy
-      {
-        type: "embed",
-        url: isMovie
-          ? `https://player.videasy.net/embed/movie/${tmdbId}`
-          : `https://player.videasy.net/embed/tv/${tmdbId}/${season}/${episode}`,
-        provider: "Videasy",
-      },
+      { type: "embed", url: `https://superembed.stream/embed/tmdb/${tmdbId}/${season}/${episode}`, provider: "SuperEmbed", lang: "sub" },
+      { type: "embed", url: `https://autoembed.cc/embed/tmdb/${tmdbId}/tv/${season}/${episode}`, provider: "AutoEmbed", lang: "sub" },
+      { type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc CC", lang: "sub" },
+      { type: "embed", url: `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc ICU", lang: "sub" },
+      { type: "embed", url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc", lang: "sub" },
+      { type: "embed", url: `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc FYI", lang: "sub" },
+      { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" },
+      { type: "embed", url: `https://player.videasy.net/embed/tv/${tmdbId}/${season}/${episode}`, provider: "Videasy", lang: "sub" },
     ];
-
     return NextResponse.json({ sources, tmdbId });
   }
 
@@ -353,7 +325,10 @@ export async function GET(req: NextRequest) {
       if (!results.length) return NextResponse.json({ sources: [] });
       const match = bestMatch(results, title);
       const sources = await getAnimePaheStream(`${match.id}/${episode}`);
-      return NextResponse.json({ sources, matchedTitle: match.title });
+      return NextResponse.json({
+        sources: sources.map((s) => ({ ...s, lang: "sub" })),
+        matchedTitle: match.title,
+      });
     } catch (err) {
       console.error("AnimePahe error:", err);
       return NextResponse.json({ sources: [] });
@@ -378,12 +353,14 @@ export async function GET(req: NextRequest) {
 
     const match = bestMatch(results, title);
     const episodes = await getGogoanimeEpisodes(match.id);
-    const ep =
-      episodes.find((e) => e.number === episode) || episodes[episode - 1];
+    const ep = episodes.find((e) => e.number === episode) || episodes[episode - 1];
     if (!ep) return NextResponse.json({ sources: [] });
 
     const sources = await getGogoanimeStream(ep.id);
-    return NextResponse.json({ sources, matchedTitle: match.title });
+    return NextResponse.json({
+      sources: sources.map((s) => ({ ...s, lang: "sub" })),
+      matchedTitle: match.title,
+    });
   } catch (err) {
     console.error("GogoAnime error:", err);
     return NextResponse.json({ sources: [], error: "Stream fetch failed" });
