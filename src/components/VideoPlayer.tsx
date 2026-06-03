@@ -75,8 +75,8 @@ export function VideoPlayer({
 
     const collected: StreamSource[] = [];
 
-    // 1. MegaPlay AniList (sub + dub, instant)
-    collected.push(...getAnilistEmbedSources(anilistId, episode, isMovie));
+    // 1. MegaPlay AniList (sub + dub)
+    collected.push(...getAnilistEmbedSources(anilistId, episode, isMovie, malId));
 
     // 2. MAL ID VidSrc (sub, instant)
     if (malId) {
