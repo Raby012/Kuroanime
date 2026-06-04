@@ -290,24 +290,29 @@ export async function GET(req: NextRequest) {
     const tmdbId = await getTmdbIdByTitle(title, year);
     if (!tmdbId) return NextResponse.json({ sources: [] });
 
-    const sources = [
-      // Sub sources
-      { type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc CC", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc FYI", lang: "sub" },
-      { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" },
-      { type: "embed", url: `https://superembed.stream/embed/tmdb/${tmdbId}/${season}/${episode}`, provider: "SuperEmbed", lang: "sub" },
-      { type: "embed", url: `https://autoembed.cc/embed/tmdb/${tmdbId}/tv/${season}/${episode}`, provider: "AutoEmbed", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc ICU", lang: "sub" },
-      { type: "embed", url: `https://player.videasy.net/embed/tv/${tmdbId}/${season}/${episode}`, provider: "Videasy", lang: "sub" },
-      { type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" },
-      // Hindi dub via LetsEmbed (real API, supports Indian languages)
-      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=hi`, provider: "LetsEmbed Hindi", lang: "hindi" },
-      // Tamil dub
-      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=ta`, provider: "LetsEmbed Tamil", lang: "tamil" },
-      // Telugu dub
-      { type: "embed", url: `https://letsembed.cc/embed/tv/?id=${tmdbId}&season=${season}&episode=${episode}&lang=te`, provider: "LetsEmbed Telugu", lang: "telugu" },
-    ];
+    // Replace TMDB sources array with:
+const sources = [
+  // SUB
+  { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 1", lang: "sub" },
+  { type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 2", lang: "sub" },
+  { type: "embed", url: `https://vsrc.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 3", lang: "sub" },
+  { type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidAPI", lang: "sub" },
+  { type: "embed", url: `https://primesrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "PrimeSrc", lang: "sub" },
+  { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" },
+  { type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" },
+  // DUB
+  { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=en`, provider: "VidSrc.me Dub", lang: "dub" },
+  { type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidAPI Dub", lang: "dub" },
+  // Hindi — VidSrc.me ds_lang=hi (sets default subtitle/audio to Hindi)
+  { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=hi`, provider: "VidSrc.me हिंदी", lang: "hindi" },
+  { type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=hi`, provider: "VidSrc.me हिंदी 2", lang: "hindi" },
+  // Tamil
+  { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=ta`, provider: "VidSrc.me தமிழ்", lang: "tamil" },
+  { type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=ta`, provider: "VidSrc.me தமிழ் 2", lang: "tamil" },
+  // Telugu
+  { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=te`, provider: "VidSrc.me తెలుగు", lang: "telugu" },
+  { type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=te`, provider: "VidSrc.me తెలుగు 2", lang: "telugu" },
+];
 
     return NextResponse.json({ sources, tmdbId });
   }
