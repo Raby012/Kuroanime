@@ -15,7 +15,7 @@ export type StreamSource =
 
 export type Language = "sub" | "dub" | "hindi" | "tamil" | "telugu";
 
-// ── MegaPlay — AniList ID + MAL ID ────────────────────────────────────────
+// ── MegaPlay — AniList + MAL ID ────────────────────────────────────────────
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -38,7 +38,6 @@ export function getAnilistEmbedSources(
       lang: "dub",
     },
   ];
-
   if (malId) {
     sources.push({
       type: "embed",
@@ -53,11 +52,12 @@ export function getAnilistEmbedSources(
       lang: "dub",
     });
   }
-
   return sources;
 }
 
-// ── VidSrc via MAL ID ──────────────────────────────────────────────────────
+// ── VidSrc.me — Live domains only ─────────────────────────────────────────
+// Official live domains: vidsrc-embed.ru, vidsrc-embed.su, vidsrcme.su, vsrc.su
+// URL format: /embed/tv?tmdb={id}&season={s}&episode={e}
 
 export function getMalEmbedSources(
   malId: number | null,
@@ -67,20 +67,25 @@ export function getMalEmbedSources(
   if (!malId) return [];
   if (isMovie) {
     return [
-      { type: "embed", url: `https://vidsrc.cc/v2/embed/movie/mal-${malId}`, provider: "VidSrc CC", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.to/embed/anime/${malId}/1/1`, provider: "VidSrc", lang: "sub" },
-      { type: "embed", url: `https://vidsrc.fyi/embed/movie/mal-${malId}`, provider: "VidSrc FYI", lang: "sub" },
+      {
+        type: "embed",
+        url: `https://vidsrc-embed.ru/embed/movie?tmdb=${malId}`,
+        provider: "VidSrc.me",
+        lang: "sub",
+      },
     ];
   }
   return [
-    { type: "embed", url: `https://vidsrc.cc/v2/embed/anime/${malId}/${episode}/1`, provider: "VidSrc CC", lang: "sub" },
-    { type: "embed", url: `https://vidsrc.to/embed/anime/${malId}/${episode}`, provider: "VidSrc", lang: "sub" },
-    { type: "embed", url: `https://vidsrc.fyi/embed/anime/${malId}/${episode}`, provider: "VidSrc FYI", lang: "sub" },
-    { type: "embed", url: `https://vidlink.pro/anime/${malId}/${episode}`, provider: "VidLink", lang: "sub" },
+    {
+      type: "embed",
+      url: `https://vidsrc-embed.ru/embed/anime?tmdb=${malId}&season=1&episode=${episode}`,
+      provider: "VidSrc.me",
+      lang: "sub",
+    },
   ];
 }
 
-// ── TMDB/IMDb embeds ──────────────────────────────────────────────────────
+// ── TMDB/IMDb embeds — verified live servers only ──────────────────────────
 
 export function getEmbedSources(
   imdbId: string | null,
@@ -93,27 +98,39 @@ export function getEmbedSources(
 
   if (tmdbId) {
     if (isMovie) {
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${tmdbId}`, provider: "VidSrc CC (TMDB)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${tmdbId}`, provider: "VidSrc (TMDB)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.fyi/embed/movie/${tmdbId}`, provider: "VidSrc FYI (TMDB)", lang: "sub" });
+      // VidSrc.me — live domains
+      sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 1", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vidsrcme.su/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 2", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vsrc.su/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 3", lang: "sub" });
+      // VidAPI
+      sources.push({ type: "embed", url: `https://vaplayer.ru/embed/movie/${tmdbId}`, provider: "VidAPI", lang: "sub" });
+      // PrimeSrc
+      sources.push({ type: "embed", url: `https://primesrc.me/embed/movie?tmdb=${tmdbId}`, provider: "PrimeSrc", lang: "sub" });
+      // VidLink
       sources.push({ type: "embed", url: `https://vidlink.pro/movie/${tmdbId}`, provider: "VidLink", lang: "sub" });
-      sources.push({ type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`, provider: "MultiEmbed", lang: "sub" });
     } else {
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc CC (TMDB)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc (TMDB)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.fyi/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidSrc FYI (TMDB)", lang: "sub" });
+      // VidSrc.me — live domains (correct format)
+      sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 1", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 2", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vsrc.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 3", lang: "sub" });
+      // VidAPI — format: /embed/tv/{tmdbId}/{season}/{episode}
+      sources.push({ type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidAPI", lang: "sub" });
+      // PrimeSrc
+      sources.push({ type: "embed", url: `https://primesrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "PrimeSrc", lang: "sub" });
+      // VidLink
       sources.push({ type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" });
+      // MultiEmbed
       sources.push({ type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" });
     }
   }
 
   if (imdbId) {
     if (isMovie) {
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/movie/${imdbId}`, provider: "VidSrc CC (IMDb)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/movie/${imdbId}`, provider: "VidSrc (IMDb)", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?imdb=${imdbId}`, provider: "VidSrc.me IMDb", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vaplayer.ru/embed/movie/${imdbId}`, provider: "VidAPI IMDb", lang: "sub" });
     } else {
-      sources.push({ type: "embed", url: `https://vidsrc.cc/v2/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc CC (IMDb)", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrc.to/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidSrc (IMDb)", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/tv?imdb=${imdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me IMDb", lang: "sub" });
+      sources.push({ type: "embed", url: `https://vaplayer.ru/embed/tv/${imdbId}/${season}/${episode}`, provider: "VidAPI IMDb", lang: "sub" });
     }
   }
 
