@@ -5,14 +5,15 @@ import {
   getEmbedSources,
   getAnilistEmbedSources,
   getMalEmbedSources,
+  getIndianDubSources,
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
-  { key: "sub", label: "SUB", flag: "🇯🇵" },
-  { key: "dub", label: "DUB", flag: "🇬🇧" },
-  { key: "hindi", label: "हिंदी", flag: "🇮🇳" },
-  { key: "tamil", label: "தமிழ்", flag: "🇮🇳" },
+  { key: "sub",    label: "SUB",    flag: "🇯🇵" },
+  { key: "dub",    label: "DUB",    flag: "🇬🇧" },
+  { key: "hindi",  label: "हिंदी",  flag: "🇮🇳" },
+  { key: "tamil",  label: "தமிழ்", flag: "🇮🇳" },
   { key: "telugu", label: "తెలుగు", flag: "🇮🇳" },
 ];
 
@@ -43,186 +44,165 @@ export function VideoPlayer({
   onEpisodeEnd,
   onProgress,
 }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<unknown>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
+  const hlsRef        = useRef<unknown>(null);
   const embedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeRef     = useRef<HTMLIFrameElement>(null);
 
-  const [language, setLanguage] = useState<Language>("sub");
-  const [allSources, setAllSources] = useState<StreamSource[]>([]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [providerLabel, setProviderLabel] = useState("");
-  const [embedLoaded, setEmbedLoaded] = useState(false);
-  const [embedError, setEmbedError] = useState(false);
+  const [language,       setLanguage]      = useState<Language>("sub");
+  const [allSources,     setAllSources]    = useState<StreamSource[]>([]);
+  const [sourceIndex,    setSourceIndex]   = useState(0);
+  const [loading,        setLoading]       = useState(true);
+  const [error,          setError]         = useState(false);
+  const [providerLabel,  setProviderLabel] = useState("");
+  const [embedConfirmed, setEmbedConfirmed] = useState(false);
 
-  // Filter sources by language — only show sources for selected lang
-  const sources = (() => {
-    const filtered = allSources.filter((s) => (s.lang ?? "sub") === language);
-    return filtered;
-  })();
+  const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
+
+  const addSources = useCallback((newSources: StreamSource[]) => {
+    setAllSources((prev) => {
+      const seen = new Set(prev.map((s) => s.url));
+      return [...prev, ...newSources.filter((s) => !seen.has(s.url))];
+    });
+  }, []);
 
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
-    setEmbedLoaded(false);
-    setEmbedError(false);
+    setEmbedConfirmed(false);
 
-    const collected: StreamSource[] = [];
-
-    // 1. MegaPlay — AniList + MAL ID (instant, sub + dub)
-    collected.push(...getAnilistEmbedSources(anilistId, episode, isMovie, malId));
-
-    // 2. VidSrc via MAL ID (instant, sub only)
-    if (malId) {
-      collected.push(...getMalEmbedSources(malId, episode, isMovie));
-    }
-
-    // 3. IMDb/TMDB direct embeds (instant if available)
-    if (imdbId || tmdbId) {
-      collected.push(
-        ...getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
-      );
-    }
-
-    setAllSources([...collected]);
+    // ── Phase 1: instant embed sources (no API calls needed) ──────────
+    const instant: StreamSource[] = [
+      ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
+      ...getIndianDubSources(anilistId, episode, isMovie, malId),
+      ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
+      ...(imdbId || tmdbId
+        ? getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
+        : []),
+    ];
+    setAllSources(instant);
     setLoading(false);
 
-    // 4. All async sources in parallel
-    const [hianime, anikoto, tmdbSources, gogo, pahe] = await Promise.all([
-      // HiAnime — real m3u8
-      fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=hianime`
-      )
-        .then((r) => r.json())
-        .then((d) => (d.sources || []) as StreamSource[])
-        .catch(() => [] as StreamSource[]),
+    // ── Phase 2: all async sources in parallel ────────────────────────
+    const apiBase = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
+    const seasonSuffix = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
-      // Anikoto — real m3u8 sub+dub
-      fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=anikoto`
-      )
-        .then((r) => r.json())
-        .then((d) => (d.sources || []) as StreamSource[])
-        .catch(() => [] as StreamSource[]),
+    const fetches = [
+      // MegaPlay via Anikoto episode ID — THE CORRECT METHOD
+      // Resolves the actual s-2 embed ID so it works for ALL anime
+      fetch(`${apiBase}&provider=megaplay`)
+        .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
 
-      // TMDB — sub + LetsEmbed Hindi/Tamil/Telugu
-      fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&season=${season}&provider=tmdb${seasonYear ? `&year=${seasonYear}` : ""}`
-      )
-        .then((r) => r.json())
-        .then((d) => (d.sources || []) as StreamSource[])
-        .catch(() => [] as StreamSource[]),
+      // HiAnime real m3u8
+      fetch(`${apiBase}&provider=hianime`)
+        .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
 
-      // GogoAnime — m3u8
-      fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=gogoanime`
-      )
-        .then((r) => r.json())
-        .then((d) =>
+      // Anikoto real m3u8
+      fetch(`${apiBase}&provider=anikoto`)
+        .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
+
+      // TMDB: sub/dub/hindi/tamil/telugu via VidSrc/VidLink/MultiEmbed
+      fetch(`${apiBase}${seasonSuffix}&provider=tmdb`)
+        .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
+
+      // GogoAnime m3u8
+      fetch(`${apiBase}&provider=gogoanime`)
+        .then((r) => r.json()).then((d) =>
           (d.sources || []).map((s: StreamSource) => ({ ...s, lang: "sub" }))
-        )
-        .catch(() => [] as StreamSource[]),
+        ).catch(() => []),
 
-      // AnimePahe — m3u8
-      fetch(
-        `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}&provider=animepahe`
-      )
-        .then((r) => r.json())
-        .then((d) =>
+      // AnimePahe m3u8
+      fetch(`${apiBase}&provider=animepahe`)
+        .then((r) => r.json()).then((d) =>
           (d.sources || []).map((s: StreamSource) => ({ ...s, lang: "sub" }))
-        )
-        .catch(() => [] as StreamSource[]),
-    ]);
+        ).catch(() => []),
+    ];
 
-    setAllSources((prev) => {
-      const combined = [...prev];
-      // Prepend real m3u8 streams (best quality)
-      const m3u8s = [...hianime, ...anikoto, ...gogo, ...pahe].filter(
-        (s) => s.type === "m3u8"
-      );
-      // TMDB sources include Hindi/Tamil/Telugu from LetsEmbed
-      const tmdbEmbeds = tmdbSources.filter((s) => s.type === "embed");
+    // Add sources as they arrive (don't wait for all)
+    fetches.forEach((p) => p.then((newSrcs) => {
+      if (newSrcs.length) {
+        setAllSources((prev) => {
+          const seen = new Set(prev.map((s) => s.url));
+          // m3u8 go to front, embeds go to back
+          const m3u8s = newSrcs.filter((s) => s.type === "m3u8" && !seen.has(s.url));
+          const embeds = newSrcs.filter((s) => s.type === "embed" && !seen.has(s.url));
+          return [...m3u8s, ...prev, ...embeds];
+        });
+      }
+    }));
 
-      // Put m3u8 first, then existing embeds, then tmdb embeds (which include Indian langs)
-      return [...m3u8s, ...combined, ...tmdbEmbeds];
-    });
-  }, [
-    animeTitle,
-    anilistId,
-    malId,
-    episode,
-    season,
-    seasonYear,
-    imdbId,
-    tmdbId,
-    isMovie,
-  ]);
+    await Promise.allSettled(fetches);
+  }, [animeTitle, anilistId, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie, addSources]);
 
-  // Reset when episode changes
-  useEffect(() => {
-    fetchSources();
-  }, [fetchSources]);
+  useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset source index when language changes
+  // Reset on language change
   useEffect(() => {
     setSourceIndex(0);
-    setEmbedLoaded(false);
-    setEmbedError(false);
+    setEmbedConfirmed(false);
     setError(false);
+    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
   }, [language]);
 
+  // On source change: update label, load HLS or start embed timer
   useEffect(() => {
     if (!sources.length) return;
     const src = sources[sourceIndex];
-    if (!src) {
-      setError(true);
-      return;
-    }
+    if (!src) { setError(true); return; }
+
     setProviderLabel(src.provider);
-    setEmbedLoaded(false);
-    setEmbedError(false);
-    if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
+    setEmbedConfirmed(false);
+    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+
+    if (src.type === "m3u8") {
+      loadHLS(src.url, src.subtitles);
+    } else {
+      // Auto-advance if no playing confirmation after 10s
+      embedTimerRef.current = setTimeout(() => {
+        if (!embedConfirmed) advanceSource();
+      }, 10000);
+    }
   }, [sources, sourceIndex]);
 
-  // Auto-advance embed after 12s if not loaded
-  useEffect(() => {
-    const src = sources[sourceIndex];
-    if (!src || src.type !== "embed") return;
-    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
-    embedTimerRef.current = setTimeout(() => {
-      if (!embedLoaded && !embedError) tryNextSource();
-    }, 12000);
-    return () => {
-      if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
-    };
-  }, [sourceIndex, sources, embedLoaded, embedError]);
-
-  // Listen for player postMessage errors
+  // postMessage from embed players
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
-        const data =
-          typeof event.data === "string"
-            ? JSON.parse(event.data)
-            : event.data;
+        const raw = event.data;
+        const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+
+        // Error events → skip to next source immediately
         if (
-          data?.type === "error" ||
           data?.event === "error" ||
+          data?.type === "error" ||
           data?.status === 404 ||
-          data?.error
+          data?.error === true ||
+          (typeof data?.message === "string" &&
+            data.message.toLowerCase().includes("not found"))
         ) {
-          setEmbedError(true);
-          setTimeout(() => tryNextSource(), 1000);
+          advanceSource();
           return;
         }
+
+        // Confirmed playing → cancel the fallback timer
+        if (
+          data?.event === "playing" ||
+          data?.event === "play"    ||
+          data?.event === "time"    ||
+          data?.type  === "watching-log" ||
+          data?.type  === "player:ready" ||
+          data?.channel === "megacloud"   // MegaPlay's channel name
+        ) {
+          setEmbedConfirmed(true);
+          if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+        }
+
         if (data?.event === "complete") onEpisodeEnd?.();
         if (
-          (data?.event === "time" && data.percent > 0.05) ||
-          (data?.type === "watching-log" && data.currentTime > 30)
+          (data?.event === "time" && (data.percent ?? 0) > 0.05) ||
+          (data?.type === "watching-log" && (data.currentTime ?? 0) > 30)
         ) {
           onProgress?.(episode);
         }
@@ -232,10 +212,17 @@ export function VideoPlayer({
     return () => window.removeEventListener("message", handleMessage);
   }, [episode, onEpisodeEnd, onProgress, sourceIndex]);
 
-  async function loadHLS(
-    url: string,
-    subtitles?: { url: string; lang: string }[]
-  ) {
+  function advanceSource() {
+    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    setEmbedConfirmed(false);
+    if (sourceIndex < sources.length - 1) {
+      setSourceIndex((i) => i + 1);
+    } else {
+      setError(true);
+    }
+  }
+
+  async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
     if (typeof window === "undefined") return;
     const video = videoRef.current;
     if (!video) return;
@@ -252,42 +239,24 @@ export function VideoPlayer({
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) tryNextSource();
-        });
+        hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) advanceSource(); });
       } else {
-        tryNextSource();
+        advanceSource();
       }
-    }
-  }
-
-  function tryNextSource() {
-    setEmbedLoaded(false);
-    setEmbedError(false);
-    if (sourceIndex < sources.length - 1) {
-      setSourceIndex((i) => i + 1);
-    } else {
-      setError(true);
     }
   }
 
   const currentSource = sources[sourceIndex];
   const isEmbed = currentSource?.type === "embed";
 
-  // Count sources per language for badges
-  const langCounts = LANGUAGES.reduce(
-    (acc, l) => {
-      acc[l.key] = allSources.filter(
-        (s) => (s.lang ?? "sub") === l.key
-      ).length;
-      return acc;
-    },
-    {} as Record<Language, number>
-  );
+  const langCounts = LANGUAGES.reduce((acc, l) => {
+    acc[l.key] = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
+    return acc;
+  }, {} as Record<Language, number>);
 
   return (
     <div className="w-full">
-      {/* Language selector */}
+      {/* Language tabs */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-1">
         {LANGUAGES.map((l) => {
           const count = langCounts[l.key] || 0;
@@ -306,13 +275,9 @@ export function VideoPlayer({
               <span>{l.flag}</span>
               <span>{l.label}</span>
               {count > 0 && (
-                <span
-                  className={`text-xs rounded-full px-1 ${
-                    language === l.key
-                      ? "bg-white/20 text-white"
-                      : "bg-white/10 text-gray-400"
-                  }`}
-                >
+                <span className={`text-xs rounded-full px-1 ${
+                  language === l.key ? "bg-white/20 text-white" : "bg-white/10 text-gray-400"
+                }`}>
                   {count}
                 </span>
               )}
@@ -326,17 +291,13 @@ export function VideoPlayer({
         {loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <Loader2 className="text-brand animate-spin" size={32} />
-            <p className="text-gray-400 text-sm">
-              Finding stream for episode {episode}...
-            </p>
+            <p className="text-gray-400 text-sm">Finding stream for episode {episode}...</p>
           </div>
         ) : error || sources.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-4">
             <AlertTriangle className="text-brand" size={32} />
             <p className="text-white font-medium text-center">
-              No{" "}
-              {LANGUAGES.find((l) => l.key === language)?.label}{" "}
-              stream available
+              No {LANGUAGES.find((l) => l.key === language)?.label} stream available
             </p>
             <p className="text-gray-400 text-sm text-center max-w-xs">
               Try a different language or source above.
@@ -349,18 +310,15 @@ export function VideoPlayer({
             </button>
           </div>
         ) : isEmbed && currentSource ? (
-          <>
-            <iframe
-              ref={iframeRef}
-              key={`${currentSource.url}-${sourceIndex}-${language}`}
-              src={currentSource.url}
-              className="w-full h-full"
-              allowFullScreen
-              allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-              style={{ border: "none" }}
-              onLoad={() => setEmbedLoaded(true)}
-            />
-          </>
+          <iframe
+            ref={iframeRef}
+            key={`${currentSource.url}-${sourceIndex}-${language}`}
+            src={currentSource.url}
+            className="w-full h-full"
+            allowFullScreen
+            allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+            style={{ border: "none" }}
+          />
         ) : currentSource?.type === "m3u8" ? (
           <video
             ref={videoRef}
@@ -374,17 +332,21 @@ export function VideoPlayer({
         ) : null}
       </div>
 
-      {/* Source info + switcher */}
+      {/* Source label + manual switcher */}
       <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
         <span className="text-xs text-gray-500 shrink-0">
-          Source:{" "}
-          <span className="text-brand font-medium">{providerLabel}</span>
+          Source: <span className="text-brand font-medium">{providerLabel}</span>
         </span>
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
           {sources.map((s, i) => (
             <button
               key={i}
-              onClick={() => setSourceIndex(i)}
+              onClick={() => {
+                if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+                setEmbedConfirmed(false);
+                setError(false);
+                setSourceIndex(i);
+              }}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors shrink-0 ${
                 i === sourceIndex
                   ? "bg-brand text-white"
