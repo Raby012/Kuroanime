@@ -6,7 +6,7 @@ import {
   getAnilistEmbedSources,
   getMalEmbedSources,
 } from "@/lib/embed-sources";
-import { Loader2, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
   { key: "sub", label: "SUB", flag: "🇯🇵" },
@@ -360,14 +360,6 @@ export function VideoPlayer({
               style={{ border: "none" }}
               onLoad={() => setEmbedLoaded(true)}
             />
-            {sourceIndex < sources.length - 1 && (
-              <button
-                onClick={tryNextSource}
-                className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-black/80 hover:bg-brand text-white text-xs px-3 py-1.5 rounded-lg transition-colors backdrop-blur-sm"
-              >
-                Next source <ChevronRight size={12} />
-              </button>
-            )}
           </>
         ) : currentSource?.type === "m3u8" ? (
           <video
