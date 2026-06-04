@@ -15,7 +15,7 @@ export type StreamSource =
 
 export type Language = "sub" | "dub" | "hindi" | "tamil" | "telugu";
 
-// ── MegaPlay — AniList + MAL ID ────────────────────────────────────────────
+// ── MegaPlay + TryEmbed — AniList & MAL ID ────────────────────────────────
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -25,6 +25,7 @@ export function getAnilistEmbedSources(
 ): StreamSource[] {
   const ep = isMovie ? 1 : episode;
   const sources: StreamSource[] = [
+    // MegaPlay via AniList ID
     {
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
@@ -37,7 +38,22 @@ export function getAnilistEmbedSources(
       provider: "MegaPlay Dub",
       lang: "dub",
     },
+    // TryEmbed — proper anime embed API, AniList ID native support
+    {
+      type: "embed",
+      url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/sub`,
+      provider: "TryEmbed Sub",
+      lang: "sub",
+    },
+    {
+      type: "embed",
+      url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/dub`,
+      provider: "TryEmbed Dub",
+      lang: "dub",
+    },
   ];
+
+  // MegaPlay via MAL ID — better coverage for older/niche anime
   if (malId) {
     sources.push({
       type: "embed",
@@ -52,12 +68,11 @@ export function getAnilistEmbedSources(
       lang: "dub",
     });
   }
+
   return sources;
 }
 
-// ── VidSrc.me — Live domains only ─────────────────────────────────────────
-// Official live domains: vidsrc-embed.ru, vidsrc-embed.su, vidsrcme.su, vsrc.su
-// URL format: /embed/tv?tmdb={id}&season={s}&episode={e}
+// ── VidSrc.me — live domains ───────────────────────────────────────────────
 
 export function getMalEmbedSources(
   malId: number | null,
@@ -78,14 +93,14 @@ export function getMalEmbedSources(
   return [
     {
       type: "embed",
-      url: `https://vidsrc-embed.ru/embed/anime?tmdb=${malId}&season=1&episode=${episode}`,
+      url: `https://vidsrc-embed.ru/embed/tv?tmdb=${malId}&season=1&episode=${episode}`,
       provider: "VidSrc.me",
       lang: "sub",
     },
   ];
 }
 
-// ── TMDB/IMDb embeds — verified live servers only ──────────────────────────
+// ── TMDB/IMDb embeds — verified live only ─────────────────────────────────
 
 export function getEmbedSources(
   imdbId: string | null,
@@ -98,28 +113,19 @@ export function getEmbedSources(
 
   if (tmdbId) {
     if (isMovie) {
-      // VidSrc.me — live domains
       sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 1", lang: "sub" });
       sources.push({ type: "embed", url: `https://vidsrcme.su/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 2", lang: "sub" });
       sources.push({ type: "embed", url: `https://vsrc.su/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 3", lang: "sub" });
-      // VidAPI
       sources.push({ type: "embed", url: `https://vaplayer.ru/embed/movie/${tmdbId}`, provider: "VidAPI", lang: "sub" });
-      // PrimeSrc
       sources.push({ type: "embed", url: `https://primesrc.me/embed/movie?tmdb=${tmdbId}`, provider: "PrimeSrc", lang: "sub" });
-      // VidLink
       sources.push({ type: "embed", url: `https://vidlink.pro/movie/${tmdbId}`, provider: "VidLink", lang: "sub" });
     } else {
-      // VidSrc.me — live domains (correct format)
       sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 1", lang: "sub" });
       sources.push({ type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 2", lang: "sub" });
       sources.push({ type: "embed", url: `https://vsrc.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "VidSrc.me 3", lang: "sub" });
-      // VidAPI — format: /embed/tv/{tmdbId}/{season}/{episode}
       sources.push({ type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`, provider: "VidAPI", lang: "sub" });
-      // PrimeSrc
       sources.push({ type: "embed", url: `https://primesrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`, provider: "PrimeSrc", lang: "sub" });
-      // VidLink
       sources.push({ type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`, provider: "VidLink", lang: "sub" });
-      // MultiEmbed
       sources.push({ type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" });
     }
   }
