@@ -15,7 +15,9 @@ export type StreamSource =
 
 export type Language = "sub" | "dub" | "hindi" | "tamil" | "telugu";
 
-// ── MegaPlay + TryEmbed — AniList & MAL ID ────────────────────────────────
+// ── Primary anime embed sources ───────────────────────────────────────────
+// These use AniList IDs directly — no TMDB lookup needed, instant load.
+// Ordered by reliability / coverage (best first).
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -25,26 +27,49 @@ export function getAnilistEmbedSources(
 ): StreamSource[] {
   const ep = isMovie ? 1 : episode;
   const sources: StreamSource[] = [
-    // MegaPlay via AniList ID
+    // ── SUB ──────────────────────────────────────────────────────────────
+    // MegaPlay — AniList ID (highest coverage for SUB)
     {
       type: "embed",
       url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`,
       provider: "MegaPlay Sub",
       lang: "sub",
     },
-    {
-      type: "embed",
-      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`,
-      provider: "MegaPlay Dub",
-      lang: "dub",
-    },
-    // TryEmbed — proper anime embed API, AniList ID native support
+    // MegaPlay — MAL ID fallback (different DB, catches what AniList misses)
+    ...(malId
+      ? [{
+          type: "embed" as const,
+          url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/sub`,
+          provider: "MegaPlay MAL Sub",
+          lang: "sub",
+        }]
+      : []),
+    // TryEmbed — SUB
     {
       type: "embed",
       url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/sub`,
       provider: "TryEmbed Sub",
       lang: "sub",
     },
+
+    // ── DUB ──────────────────────────────────────────────────────────────
+    // MegaPlay — AniList ID dub
+    {
+      type: "embed",
+      url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`,
+      provider: "MegaPlay Dub",
+      lang: "dub",
+    },
+    // MegaPlay — MAL ID dub
+    ...(malId
+      ? [{
+          type: "embed" as const,
+          url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/dub`,
+          provider: "MegaPlay MAL Dub",
+          lang: "dub",
+        }]
+      : []),
+    // TryEmbed — DUB
     {
       type: "embed",
       url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/dub`,
@@ -53,26 +78,87 @@ export function getAnilistEmbedSources(
     },
   ];
 
-  // MegaPlay via MAL ID — better coverage for older/niche anime
+  return sources;
+}
+
+// ── Indian language dub sources ───────────────────────────────────────────
+// AutoEmbed has the best Hindi/Tamil/Telugu coverage using AniList IDs.
+
+export function getIndianDubSources(
+  anilistId: number,
+  episode: number,
+  isMovie: boolean,
+  malId?: number | null
+): StreamSource[] {
+  const ep = isMovie ? 1 : episode;
+  const sources: StreamSource[] = [];
+
+  // ── AutoEmbed — best Indian dub coverage ──
+  sources.push({
+    type: "embed",
+    url: `https://player.autoembed.cc/embed/anime/${anilistId}/${ep}?audio=hindi`,
+    provider: "AutoEmbed हिंदी",
+    lang: "hindi",
+  });
+  sources.push({
+    type: "embed",
+    url: `https://player.autoembed.cc/embed/anime/${anilistId}/${ep}?audio=tamil`,
+    provider: "AutoEmbed தமிழ்",
+    lang: "tamil",
+  });
+  sources.push({
+    type: "embed",
+    url: `https://player.autoembed.cc/embed/anime/${anilistId}/${ep}?audio=telugu`,
+    provider: "AutoEmbed తెలుగు",
+    lang: "telugu",
+  });
+
+  // ── MegaPlay Indian dubs via AniList ID ──
+  sources.push({
+    type: "embed",
+    url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/hindi`,
+    provider: "MegaPlay हिंदी",
+    lang: "hindi",
+  });
+  sources.push({
+    type: "embed",
+    url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/tamil`,
+    provider: "MegaPlay தமிழ்",
+    lang: "tamil",
+  });
+  sources.push({
+    type: "embed",
+    url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/telugu`,
+    provider: "MegaPlay తెలుగు",
+    lang: "telugu",
+  });
+
+  // ── MegaPlay Indian dubs via MAL ID ──
   if (malId) {
     sources.push({
       type: "embed",
-      url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/sub`,
-      provider: "MegaPlay MAL Sub",
-      lang: "sub",
+      url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/hindi`,
+      provider: "MegaPlay MAL हिंदी",
+      lang: "hindi",
     });
     sources.push({
       type: "embed",
-      url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/dub`,
-      provider: "MegaPlay MAL Dub",
-      lang: "dub",
+      url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/tamil`,
+      provider: "MegaPlay MAL தமிழ்",
+      lang: "tamil",
+    });
+    sources.push({
+      type: "embed",
+      url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/telugu`,
+      provider: "MegaPlay MAL తెలుగు",
+      lang: "telugu",
     });
   }
 
   return sources;
 }
 
-// ── VidSrc.me — live domains ───────────────────────────────────────────────
+// ── VidSrc.me — MAL/TMDB ID based ─────────────────────────────────────────
 
 export function getMalEmbedSources(
   malId: number | null,
@@ -100,7 +186,7 @@ export function getMalEmbedSources(
   ];
 }
 
-// ── TMDB/IMDb embeds — verified live only ─────────────────────────────────
+// ── TMDB/IMDb embeds ───────────────────────────────────────────────────────
 
 export function getEmbedSources(
   imdbId: string | null,
