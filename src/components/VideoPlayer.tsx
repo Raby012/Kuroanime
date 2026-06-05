@@ -31,6 +31,21 @@ interface VideoPlayerProps {
   onProgress?: (episode: number) => void;
 }
 
+// Pre-validate an embed URL via our server-side proxy.
+// Returns true if the URL serves real video content (not a 404/error page).
+async function validateEmbed(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `/api/validate-embed?url=${encodeURIComponent(url)}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    const data = await res.json();
+    return data.valid === true;
+  } catch {
+    return false; // If check fails, treat as invalid
+  }
+}
+
 export function VideoPlayer({
   animeTitle,
   anilistId,
@@ -46,34 +61,31 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef      = useRef<HTMLVideoElement>(null);
   const hlsRef        = useRef<unknown>(null);
-  const embedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iframeRef     = useRef<HTMLIFrameElement>(null);
+  const timerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [language,       setLanguage]      = useState<Language>("sub");
-  const [allSources,     setAllSources]    = useState<StreamSource[]>([]);
-  const [sourceIndex,    setSourceIndex]   = useState(0);
-  const [loading,        setLoading]       = useState(true);
-  const [error,          setError]         = useState(false);
-  const [providerLabel,  setProviderLabel] = useState("");
-  const [embedConfirmed, setEmbedConfirmed] = useState(false);
+  const [language,      setLanguage]      = useState<Language>("sub");
+  const [allSources,    setAllSources]    = useState<StreamSource[]>([]);
+  const [sourceIndex,   setSourceIndex]   = useState(0);
+  const [loading,       setLoading]       = useState(true);
+  const [validating,    setValidating]    = useState(false);
+  const [error,         setError]         = useState(false);
+  const [providerLabel, setProviderLabel] = useState("");
+  const [confirmed,     setConfirmed]     = useState(false);
 
+  // Only sources for the current language tab
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
-  const addSources = useCallback((newSources: StreamSource[]) => {
-    setAllSources((prev) => {
-      const seen = new Set(prev.map((s) => s.url));
-      return [...prev, ...newSources.filter((s) => !seen.has(s.url))];
-    });
-  }, []);
-
+  // ── Source fetching ────────────────────────────────────────────────────
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
-    setEmbedConfirmed(false);
+    setConfirmed(false);
+    setValidating(false);
 
-    // ── Phase 1: instant embed sources (no API calls needed) ──────────
+    // Phase 1: instant embed sources (no async API calls)
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
       ...getIndianDubSources(anilistId, episode, isMovie, malId),
@@ -85,34 +97,28 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
-    // ── Phase 2: all async sources in parallel ────────────────────────
+    // Phase 2: async m3u8 + MegaPlay s-2 + TMDB Indian langs (background)
     const apiBase = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
-    const seasonSuffix = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
+    const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
-    const fetches = [
-      // MegaPlay via Anikoto episode ID — THE CORRECT METHOD
-      // Resolves the actual s-2 embed ID so it works for ALL anime
+    const asyncFetches = [
+      // MegaPlay via Anikoto episode ID — works for FULL library
       fetch(`${apiBase}&provider=megaplay`)
         .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
-
       // HiAnime real m3u8
       fetch(`${apiBase}&provider=hianime`)
         .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
-
       // Anikoto real m3u8
       fetch(`${apiBase}&provider=anikoto`)
         .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
-
-      // TMDB: sub/dub/hindi/tamil/telugu via VidSrc/VidLink/MultiEmbed
-      fetch(`${apiBase}${seasonSuffix}&provider=tmdb`)
+      // TMDB extra Indian lang embeds
+      fetch(`${apiBase}${seasonQ}&provider=tmdb`)
         .then((r) => r.json()).then((d) => (d.sources || []) as StreamSource[]).catch(() => []),
-
       // GogoAnime m3u8
       fetch(`${apiBase}&provider=gogoanime`)
         .then((r) => r.json()).then((d) =>
           (d.sources || []).map((s: StreamSource) => ({ ...s, lang: "sub" }))
         ).catch(() => []),
-
       // AnimePahe m3u8
       fetch(`${apiBase}&provider=animepahe`)
         .then((r) => r.json()).then((d) =>
@@ -120,83 +126,93 @@ export function VideoPlayer({
         ).catch(() => []),
     ];
 
-    // Add sources as they arrive (don't wait for all)
-    fetches.forEach((p) => p.then((newSrcs) => {
-      if (newSrcs.length) {
+    // Add each as it resolves — m3u8 go to front (best quality), embeds to back
+    asyncFetches.forEach((p) =>
+      p.then((newSrcs) => {
+        if (!newSrcs.length) return;
         setAllSources((prev) => {
           const seen = new Set(prev.map((s) => s.url));
-          // m3u8 go to front, embeds go to back
-          const m3u8s = newSrcs.filter((s) => s.type === "m3u8" && !seen.has(s.url));
-          const embeds = newSrcs.filter((s) => s.type === "embed" && !seen.has(s.url));
+          const fresh = newSrcs.filter((s) => !seen.has(s.url));
+          const m3u8s = fresh.filter((s) => s.type === "m3u8");
+          const embeds = fresh.filter((s) => s.type === "embed");
           return [...m3u8s, ...prev, ...embeds];
         });
-      }
-    }));
-
-    await Promise.allSettled(fetches);
-  }, [animeTitle, anilistId, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie, addSources]);
+      })
+    );
+  }, [animeTitle, anilistId, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset on language change
+  // Reset on language tab change
   useEffect(() => {
     setSourceIndex(0);
-    setEmbedConfirmed(false);
+    setConfirmed(false);
     setError(false);
-    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    setValidating(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
   }, [language]);
 
-  // On source change: update label, load HLS or start embed timer
+  // ── Load current source ────────────────────────────────────────────────
   useEffect(() => {
-    if (!sources.length) return;
+    if (loading || !sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
 
     setProviderLabel(src.provider);
-    setEmbedConfirmed(false);
-    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+    setConfirmed(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
 
     if (src.type === "m3u8") {
+      setValidating(false);
       loadHLS(src.url, src.subtitles);
     } else {
-      // Auto-advance if no playing confirmation after 10s
-      embedTimerRef.current = setTimeout(() => {
-        if (!embedConfirmed) advanceSource();
-      }, 10000);
+      // Pre-validate the embed URL before showing the iframe
+      setValidating(true);
+      validateEmbed(src.url).then((valid) => {
+        setValidating(false);
+        if (valid) {
+          // Real content — show the iframe
+          setConfirmed(false); // wait for postMessage to confirm playing
+          // Safety fallback: if no postMessage in 15s, try next
+          timerRef.current = setTimeout(() => {
+            if (!confirmed) advanceSource();
+          }, 15000);
+        } else {
+          // Error page detected — skip immediately, no iframe flash
+          advanceSource();
+        }
+      });
     }
-  }, [sources, sourceIndex]);
+  }, [sources, sourceIndex, loading]);
 
-  // postMessage from embed players
+  // ── postMessage from embed players ────────────────────────────────────
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
-        const raw = event.data;
-        const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
 
-        // Error events → skip to next source immediately
+        // Error → skip
         if (
           data?.event === "error" ||
           data?.type === "error" ||
           data?.status === 404 ||
-          data?.error === true ||
-          (typeof data?.message === "string" &&
-            data.message.toLowerCase().includes("not found"))
+          data?.error === true
         ) {
           advanceSource();
           return;
         }
 
-        // Confirmed playing → cancel the fallback timer
+        // Playing confirmed → cancel fallback timer
         if (
           data?.event === "playing" ||
-          data?.event === "play"    ||
-          data?.event === "time"    ||
-          data?.type  === "watching-log" ||
-          data?.type  === "player:ready" ||
-          data?.channel === "megacloud"   // MegaPlay's channel name
+          data?.event === "play" ||
+          data?.event === "time" ||
+          data?.type === "watching-log" ||
+          data?.type === "player:ready" ||
+          data?.channel === "megacloud"
         ) {
-          setEmbedConfirmed(true);
-          if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
+          setConfirmed(true);
+          if (timerRef.current) clearTimeout(timerRef.current);
         }
 
         if (data?.event === "complete") onEpisodeEnd?.();
@@ -210,11 +226,12 @@ export function VideoPlayer({
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [episode, onEpisodeEnd, onProgress, sourceIndex]);
+  }, [episode, onEpisodeEnd, onProgress, sourceIndex, confirmed]);
 
   function advanceSource() {
-    if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
-    setEmbedConfirmed(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setConfirmed(false);
+    setValidating(false);
     if (sourceIndex < sources.length - 1) {
       setSourceIndex((i) => i + 1);
     } else {
@@ -248,6 +265,7 @@ export function VideoPlayer({
 
   const currentSource = sources[sourceIndex];
   const isEmbed = currentSource?.type === "embed";
+  const showIframe = isEmbed && !validating && !error && sources.length > 0;
 
   const langCounts = LANGUAGES.reduce((acc, l) => {
     acc[l.key] = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
@@ -288,10 +306,12 @@ export function VideoPlayer({
 
       {/* Player */}
       <div className="w-full aspect-video bg-black rounded-xl overflow-hidden relative">
-        {loading ? (
+        {loading || validating ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <Loader2 className="text-brand animate-spin" size={32} />
-            <p className="text-gray-400 text-sm">Finding stream for episode {episode}...</p>
+            <p className="text-gray-400 text-sm">
+              {validating ? `Checking source…` : `Finding stream for episode ${episode}…`}
+            </p>
           </div>
         ) : error || sources.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-4">
@@ -309,7 +329,7 @@ export function VideoPlayer({
               <RefreshCw size={14} /> Retry
             </button>
           </div>
-        ) : isEmbed && currentSource ? (
+        ) : showIframe && currentSource ? (
           <iframe
             ref={iframeRef}
             key={`${currentSource.url}-${sourceIndex}-${language}`}
@@ -327,7 +347,10 @@ export function VideoPlayer({
             autoPlay
             playsInline
             onEnded={onEpisodeEnd}
-            onPlay={() => onProgress?.(episode)}
+            onPlay={() => {
+              setConfirmed(true);
+              onProgress?.(episode);
+            }}
           />
         ) : null}
       </div>
@@ -342,8 +365,9 @@ export function VideoPlayer({
             <button
               key={i}
               onClick={() => {
-                if (embedTimerRef.current) clearTimeout(embedTimerRef.current);
-                setEmbedConfirmed(false);
+                if (timerRef.current) clearTimeout(timerRef.current);
+                setConfirmed(false);
+                setValidating(false);
                 setError(false);
                 setSourceIndex(i);
               }}
