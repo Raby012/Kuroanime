@@ -1,22 +1,12 @@
 export type StreamSource =
-  | {
-      type: "m3u8";
-      url: string;
-      subtitles?: { url: string; lang: string }[];
-      provider: string;
-      lang?: string;
-    }
-  | {
-      type: "embed";
-      url: string;
-      provider: string;
-      lang?: string;
-    };
+  | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string; lang?: string }
+  | { type: "embed"; url: string; provider: string; lang?: string };
 
 export type Language = "sub" | "dub" | "hindi" | "tamil" | "telugu";
 
-// ── SUB + DUB embed sources (AniList ID based, instant) ───────────────────
-// These genuinely serve Japanese sub and English dub content.
+// ── SUB + DUB sources (AniList ID, instant) ───────────────────────────────
+// TryEmbed REMOVED — shows "PLAYBACK ERROR. ALL SERVERS UNAVAILABLE" for most anime.
+// It loads its own UI first, then fails internally — unfixable on our end.
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -26,15 +16,18 @@ export function getAnilistEmbedSources(
 ): StreamSource[] {
   const ep = isMovie ? 1 : episode;
   const sources: StreamSource[] = [
-    // MegaPlay — widest anime coverage via AniList ID
+    // MegaPlay — AniList ID (best coverage)
     { type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`, provider: "MegaPlay Sub", lang: "sub" },
     { type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`, provider: "MegaPlay Dub", lang: "dub" },
-    // TryEmbed — good coverage, AniList native
-    { type: "embed", url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/sub`, provider: "TryEmbed Sub", lang: "sub" },
-    { type: "embed", url: `https://tryembed.us.cc/embed/anime/${anilistId}/${ep}/dub`, provider: "TryEmbed Dub", lang: "dub" },
+    // VidNest — AniList ID, reliable, no TryEmbed issues
+    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/sub`, provider: "VidNest Sub", lang: "sub" },
+    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/dub`, provider: "VidNest Dub", lang: "dub" },
+    // NHDapi — AniList ID
+    { type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/sub`, provider: "NHDapi Sub", lang: "sub" },
+    { type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/dub`, provider: "NHDapi Dub", lang: "dub" },
   ];
 
-  // MAL ID variants — different DB, catches what AniList mapping misses
+  // MAL ID fallbacks — different database, catches what AniList mapping misses
   if (malId) {
     sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/sub`, provider: "MegaPlay MAL Sub", lang: "sub" });
     sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/dub`, provider: "MegaPlay MAL Dub", lang: "dub" });
@@ -43,9 +36,49 @@ export function getAnilistEmbedSources(
   return sources;
 }
 
+// ── Hindi / Tamil / Telugu — REAL dub sources ─────────────────────────────
+// VidNest and NHDapi natively support hindi/tamil/telugu via AniList ID.
+// These are actual dubbed audio tracks, not fake ds_lang subtitle params.
+
+export function getIndianDubSources(
+  anilistId: number,
+  episode: number,
+  isMovie: boolean,
+  malId?: number | null
+): StreamSource[] {
+  const ep = isMovie ? 1 : episode;
+  const sources: StreamSource[] = [];
+
+  // VidNest — confirmed hindi/tamil/telugu support via AniList ID
+  sources.push({ type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/hindi`,  provider: "VidNest हिंदी",   lang: "hindi"  });
+  sources.push({ type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/tamil`,  provider: "VidNest தமிழ்",  lang: "tamil"  });
+  sources.push({ type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/telugu`, provider: "VidNest తెలుగు", lang: "telugu" });
+
+  // NHDapi — same URL format, same language support
+  sources.push({ type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/hindi`,  provider: "NHDapi हिंदी",   lang: "hindi"  });
+  sources.push({ type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/tamil`,  provider: "NHDapi தமிழ்",  lang: "tamil"  });
+  sources.push({ type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/telugu`, provider: "NHDapi తెలుగు", lang: "telugu" });
+
+  // AnimePahe variants via VidNest (different source backend — more coverage)
+  sources.push({ type: "embed", url: `https://vidnest.fun/animepahe/${anilistId}/${ep}/hindi`,  provider: "VidNest Pahe हिंदी",   lang: "hindi"  });
+  sources.push({ type: "embed", url: `https://vidnest.fun/animepahe/${anilistId}/${ep}/tamil`,  provider: "VidNest Pahe தமிழ்",  lang: "tamil"  });
+  sources.push({ type: "embed", url: `https://vidnest.fun/animepahe/${anilistId}/${ep}/telugu`, provider: "VidNest Pahe తెలుగు", lang: "telugu" });
+
+  // MegaPlay Indian dubs (these may or may not work depending on mapping)
+  sources.push({ type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/hindi`,  provider: "MegaPlay हिंदी",   lang: "hindi"  });
+  sources.push({ type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/tamil`,  provider: "MegaPlay தமிழ்",  lang: "tamil"  });
+  sources.push({ type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/telugu`, provider: "MegaPlay తెలుగు", lang: "telugu" });
+
+  if (malId) {
+    sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/hindi`,  provider: "MegaPlay MAL हिंदी",   lang: "hindi"  });
+    sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/tamil`,  provider: "MegaPlay MAL தமிழ்",  lang: "tamil"  });
+    sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/telugu`, provider: "MegaPlay MAL తెలుగు", lang: "telugu" });
+  }
+
+  return sources;
+}
+
 // ── VidSrc via MAL ID — sub only ──────────────────────────────────────────
-// NOTE: VidSrc ds_lang param does NOT change audio to Hindi/Tamil/Telugu.
-// It only sets subtitle preference. Do NOT use ds_lang for Indian dubs.
 
 export function getMalEmbedSources(
   malId: number | null,
@@ -53,15 +86,11 @@ export function getMalEmbedSources(
   isMovie: boolean
 ): StreamSource[] {
   if (!malId) return [];
-  if (isMovie) {
-    return [{ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?tmdb=${malId}`, provider: "VidSrc.me", lang: "sub" }];
-  }
+  if (isMovie) return [{ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?tmdb=${malId}`, provider: "VidSrc.me", lang: "sub" }];
   return [{ type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${malId}&season=1&episode=${episode}`, provider: "VidSrc.me", lang: "sub" }];
 }
 
-// ── TMDB/IMDb embed sources — sub only ────────────────────────────────────
-// These are general streaming embeds. They do NOT have real Hindi/Tamil/Telugu
-// dubbed anime audio. Only listed under "sub" lang intentionally.
+// ── TMDB/IMDb embeds — sub only ───────────────────────────────────────────
 
 export function getEmbedSources(
   imdbId: string | null,
@@ -71,11 +100,9 @@ export function getEmbedSources(
   isMovie: boolean
 ): StreamSource[] {
   const sources: StreamSource[] = [];
-
   if (tmdbId) {
     if (isMovie) {
       sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 1", lang: "sub" });
-      sources.push({ type: "embed", url: `https://vidsrcme.su/embed/movie?tmdb=${tmdbId}`, provider: "VidSrc.me 2", lang: "sub" });
       sources.push({ type: "embed", url: `https://vaplayer.ru/embed/movie/${tmdbId}`, provider: "VidAPI", lang: "sub" });
       sources.push({ type: "embed", url: `https://vidlink.pro/movie/${tmdbId}`, provider: "VidLink", lang: "sub" });
     } else {
@@ -86,7 +113,6 @@ export function getEmbedSources(
       sources.push({ type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`, provider: "MultiEmbed", lang: "sub" });
     }
   }
-
   if (imdbId) {
     if (isMovie) {
       sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/movie?imdb=${imdbId}`, provider: "VidSrc IMDb", lang: "sub" });
@@ -94,20 +120,5 @@ export function getEmbedSources(
       sources.push({ type: "embed", url: `https://vidsrc-embed.ru/embed/tv?imdb=${imdbId}&season=${season}&episode=${episode}`, provider: "VidSrc IMDb", lang: "sub" });
     }
   }
-
   return sources;
-}
-
-// ── Indian dub sources ────────────────────────────────────────────────────
-// These are ONLY added when the /api/stream?provider=indian route resolves
-// real m3u8 URLs from watchanimeworld.net scraper.
-// This function is intentionally empty — Indian sources come from the API route.
-// DO NOT add fake ds_lang=hi VidSrc URLs here — they play English, not Hindi.
-export function getIndianDubSources(
-  _anilistId: number,
-  _episode: number,
-  _isMovie: boolean,
-  _malId?: number | null
-): StreamSource[] {
-  return []; // Real sources fetched async via /api/stream?provider=indian
 }
