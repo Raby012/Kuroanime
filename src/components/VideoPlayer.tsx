@@ -5,6 +5,7 @@ import {
   getEmbedSources,
   getAnilistEmbedSources,
   getMalEmbedSources,
+  getIndianDubSources,
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
@@ -43,28 +44,30 @@ export function VideoPlayer({
   onEpisodeEnd,
   onProgress,
 }: VideoPlayerProps) {
-  const videoRef  = useRef<HTMLVideoElement>(null);
-  const hlsRef    = useRef<unknown>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const hlsRef     = useRef<unknown>(null);
+  const iframeRef  = useRef<HTMLIFrameElement>(null);
 
-  const [language,      setLanguage]      = useState<Language>("sub");
-  const [allSources,    setAllSources]    = useState<StreamSource[]>([]);
-  const [sourceIndex,   setSourceIndex]   = useState(0);
-  const [loading,       setLoading]       = useState(true);
-  const [error,         setError]         = useState(false);
-  const [providerLabel, setProviderLabel] = useState("");
+  const [language,       setLanguage]      = useState<Language>("sub");
+  const [allSources,     setAllSources]    = useState<StreamSource[]>([]);
+  const [sourceIndex,    setSourceIndex]   = useState(0);
+  const [loading,        setLoading]       = useState(true);
+  const [error,          setError]         = useState(false);
+  const [providerLabel,  setProviderLabel] = useState("");
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
+  // ── Fetch all sources ─────────────────────────────────────────────────
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
 
-    // Phase 1 — instant embed sources, no API calls needed
+    // Phase 1: instant embed sources (no API calls needed)
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
+      ...getIndianDubSources(anilistId, episode, isMovie, malId), // VidNest + NHDapi Hindi/Tamil/Telugu
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
       ...(imdbId || tmdbId
         ? getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
@@ -73,12 +76,11 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
-    // Phase 2 — async API sources added as they resolve
+    // Phase 2: async m3u8 + MegaPlay s-2 sources (background)
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
     const apiFetches: Promise<StreamSource[]>[] = [
-      fetch(`${base}&provider=indian`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
       fetch(`${base}&provider=megaplay`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
       fetch(`${base}&provider=hianime`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
       fetch(`${base}&provider=anikoto`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
@@ -90,11 +92,11 @@ export function VideoPlayer({
     apiFetches.forEach((p) =>
       p.then((newSrcs) => {
         if (!newSrcs.length) return;
-        setAllSources((prev) => {
-          const seen  = new Set(prev.map((s) => s.url));
-          const fresh = newSrcs.filter((s) => !seen.has(s.url));
-          const m3u8s  = fresh.filter((s) => s.type === "m3u8");
-          const embeds = fresh.filter((s) => s.type === "embed");
+        setAllSources((prev: StreamSource[]) => {
+          const seen = new Set(prev.map((s: StreamSource) => s.url));
+          const fresh = newSrcs.filter((s: StreamSource) => !seen.has(s.url));
+          const m3u8s  = fresh.filter((s: StreamSource) => s.type === "m3u8");
+          const embeds = fresh.filter((s: StreamSource) => s.type === "embed");
           return [...m3u8s, ...prev, ...embeds];
         });
       })
@@ -103,26 +105,27 @@ export function VideoPlayer({
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset on language change
+  // Reset on language tab change
   useEffect(() => {
     setSourceIndex(0);
     setError(false);
   }, [language]);
 
-  // Load source whenever index changes
+  // ── Load source when index changes ────────────────────────────────────
   useEffect(() => {
     if (loading || !sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
+
     setProviderLabel(src.provider);
-    // m3u8 only — embeds render via iframe, nothing to "load" here
     if (src.type === "m3u8") {
       loadHLS(src.url, src.subtitles);
     }
+    // Embed: just show it. No auto-skip, no validation. User picks manually.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
 
-  // postMessage — only track progress/completion, NEVER auto-advance
+  // ── postMessage — only for progress/complete tracking, no auto-skip ──
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
@@ -130,12 +133,11 @@ export function VideoPlayer({
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
         if (data?.event === "complete") onEpisodeEnd?.();
         if (
-          (data?.event === "time" && data.percent > 0.05) ||
-          (data?.type === "watching-log" && data.currentTime > 30)
+          (data?.event === "time" && (data.percent ?? 0) > 0.05) ||
+          (data?.type === "watching-log" && (data.currentTime ?? 0) > 30)
         ) {
           onProgress?.(episode);
         }
-        // ALL error events ignored — user switches source manually
       } catch {}
     }
     window.addEventListener("message", handleMessage);
@@ -160,21 +162,21 @@ export function VideoPlayer({
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
-          // m3u8 fatal error → try next m3u8 source, but don't touch embed sources
           if (data.fatal) {
-            const nextIdx = sourceIndex + 1;
-            if (nextIdx < sources.length && sources[nextIdx]?.type === "m3u8") {
-              setSourceIndex(nextIdx);
-            }
-            // if next source is an embed, do nothing — let user pick
+            // HLS fatal error — do nothing, user sees the error state naturally
+            console.error("HLS fatal error");
           }
         });
+      } else {
+        // HLS not supported — nothing to do
+        console.warn("HLS not supported in this browser");
       }
-      // if HLS not supported, do nothing — user picks another source
     }
   }
 
   const currentSource = sources[sourceIndex];
+  const isEmbed    = currentSource?.type === "embed";
+  const showIframe = isEmbed && !loading && !error && sources.length > 0;
 
   const langCounts = LANGUAGES.reduce(
     (acc, l) => {
@@ -205,7 +207,13 @@ export function VideoPlayer({
               <span>{l.flag}</span>
               <span>{l.label}</span>
               {count > 0 && (
-                <span className={`text-xs rounded-full px-1 ${language === l.key ? "bg-white/20 text-white" : "bg-white/10 text-gray-400"}`}>
+                <span
+                  className={`text-xs rounded-full px-1 ${
+                    language === l.key
+                      ? "bg-white/20 text-white"
+                      : "bg-white/10 text-gray-400"
+                  }`}
+                >
                   {count}
                 </span>
               )}
@@ -237,7 +245,7 @@ export function VideoPlayer({
               <RefreshCw size={14} /> Retry
             </button>
           </div>
-        ) : currentSource?.type === "embed" ? (
+        ) : showIframe && currentSource ? (
           <iframe
             ref={iframeRef}
             key={`${currentSource.url}-${sourceIndex}-${language}`}
@@ -263,7 +271,8 @@ export function VideoPlayer({
       {/* Source label + manual switcher */}
       <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
         <span className="text-xs text-gray-500 shrink-0">
-          Source: <span className="text-brand font-medium">{providerLabel}</span>
+          Source:{" "}
+          <span className="text-brand font-medium">{providerLabel}</span>
         </span>
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
           {sources.map((s, i) => (
