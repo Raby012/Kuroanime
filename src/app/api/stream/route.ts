@@ -425,4 +425,4 @@ export async function GET(req: NextRequest) {
     console.error("GogoAnime error:", err);
     return NextResponse.json({ sources: [], error: "Stream fetch failed" });
   }
-        }
+}
