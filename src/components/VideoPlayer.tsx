@@ -8,6 +8,22 @@ import {
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
+// ── CHANGE THESE to control auto-advance behaviour ────────────────────────
+//
+// EMBED_DISPLAY_TIME_MS
+//   How long (ms) to display each embed before auto-skipping to the next.
+//   Set to 0 to DISABLE auto-advance (user must pick manually via buttons).
+//   Examples: 0 = off, 15000 = 15s, 30000 = 30s, 60000 = 1 min
+const EMBED_DISPLAY_TIME_MS = 0; // ← set e.g. 30000 for 30-second auto-skip
+//
+// VALIDATE_TIMEOUT_MS
+//   How long (ms) to wait for /api/validate-embed before giving up and
+//   just showing the iframe anyway. Increase if your server is slow.
+//   Examples: 5000 = 5s (fast), 10000 = 10s, 20000 = 20s (patient)
+const VALIDATE_TIMEOUT_MS = 8000;
+//
+// ─────────────────────────────────────────────────────────────────────────
+
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
   { key: "sub",    label: "SUB",    flag: "🇯🇵" },
   { key: "dub",    label: "DUB",    flag: "🇬🇧" },
@@ -43,18 +59,18 @@ export function VideoPlayer({
   onEpisodeEnd,
   onProgress,
 }: VideoPlayerProps) {
-  const videoRef   = useRef<HTMLVideoElement>(null);
-  const hlsRef     = useRef<unknown>(null);
-  const iframeRef  = useRef<HTMLIFrameElement>(null);
-  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const hlsRef    = useRef<unknown>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [language,       setLanguage]      = useState<Language>("sub");
-  const [allSources,     setAllSources]    = useState<StreamSource[]>([]);
-  const [sourceIndex,    setSourceIndex]   = useState(0);
-  const [loading,        setLoading]       = useState(true);
-  const [validating,     setValidating]    = useState(false);
-  const [error,          setError]         = useState(false);
-  const [providerLabel,  setProviderLabel] = useState("");
+  const [language,      setLanguage]      = useState<Language>("sub");
+  const [allSources,    setAllSources]    = useState<StreamSource[]>([]);
+  const [sourceIndex,   setSourceIndex]   = useState(0);
+  const [loading,       setLoading]       = useState(true);
+  const [validating,    setValidating]    = useState(false);
+  const [error,         setError]         = useState(false);
+  const [providerLabel, setProviderLabel] = useState("");
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
@@ -67,10 +83,8 @@ export function VideoPlayer({
     setValidating(false);
     if (timerRef.current) clearTimeout(timerRef.current);
 
-    // Phase 1: instant embed sources (no API calls)
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
-      // Indian dubs fetched async via /api/stream?provider=indian
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
       ...(imdbId || tmdbId
         ? getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
@@ -79,7 +93,6 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
-    // Phase 2: async sources — each added as they resolve
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
@@ -97,7 +110,7 @@ export function VideoPlayer({
       p.then((newSrcs) => {
         if (!newSrcs.length) return;
         setAllSources((prev: StreamSource[]) => {
-          const seen = new Set(prev.map((s: StreamSource) => s.url));
+          const seen  = new Set(prev.map((s: StreamSource) => s.url));
           const fresh = newSrcs.filter((s: StreamSource) => !seen.has(s.url));
           const m3u8s  = fresh.filter((s: StreamSource) => s.type === "m3u8");
           const embeds = fresh.filter((s: StreamSource) => s.type === "embed");
@@ -130,22 +143,37 @@ export function VideoPlayer({
     if (src.type === "m3u8") {
       loadHLS(src.url, src.subtitles);
     } else {
-      // Pre-validate via server-side proxy before showing iframe
+      // Validate with a hard timeout — if validate-embed takes longer than
+      // VALIDATE_TIMEOUT_MS, just show the iframe anyway.
       setValidating(true);
+
+      const validateTimeout = setTimeout(() => {
+        setValidating(false);
+        // Don't skip — just show the iframe. User can switch manually.
+      }, VALIDATE_TIMEOUT_MS);
+
       fetch(`/api/validate-embed?url=${encodeURIComponent(src.url)}`)
         .then((r) => r.json())
         .then((data: { valid: boolean }) => {
+          clearTimeout(validateTimeout);
           setValidating(false);
           if (!data.valid) {
-            // Skip this source silently — no iframe flash
-            advanceSource();
+            advanceSource(); // confirmed dead → skip silently
           }
-          // else: valid, React renders the iframe via showIframe condition
+          // valid → showIframe condition met, iframe renders
         })
         .catch(() => {
+          clearTimeout(validateTimeout);
           setValidating(false);
-          // On check failure, just show the iframe anyway
+          // Network error → show iframe anyway, don't skip
         });
+
+      // Auto-advance after EMBED_DISPLAY_TIME_MS (only if > 0)
+      if (EMBED_DISPLAY_TIME_MS > 0) {
+        timerRef.current = setTimeout(() => {
+          advanceSource();
+        }, EMBED_DISPLAY_TIME_MS);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
@@ -156,19 +184,15 @@ export function VideoPlayer({
       try {
         const data =
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-
-        // Error signals → skip to next
         if (
-          data?.event === "error" ||
-          data?.type  === "error" ||
-          data?.status === 404   ||
+          data?.event  === "error" ||
+          data?.type   === "error" ||
+          data?.status === 404    ||
           data?.error  === true
         ) {
           advanceSource();
           return;
         }
-
-        // Playing confirmed — nothing needed, iframe stays
       } catch {}
     }
     window.addEventListener("message", handleMessage);
@@ -213,8 +237,7 @@ export function VideoPlayer({
   }
 
   const currentSource = sources[sourceIndex];
-  const isEmbed   = currentSource?.type === "embed";
-  // Show iframe only after validation passes (validating=false) and no error
+  const isEmbed    = currentSource?.type === "embed";
   const showIframe = isEmbed && !validating && !loading && !error && sources.length > 0;
 
   const langCounts = LANGUAGES.reduce(
