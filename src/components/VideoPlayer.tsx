@@ -8,20 +8,9 @@ import {
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
-// ── CHANGE THESE to control auto-advance behaviour ────────────────────────
-//
-// EMBED_DISPLAY_TIME_MS
-//   How long (ms) to display each embed before auto-skipping to the next.
-//   Set to 0 to DISABLE auto-advance (user must pick manually via buttons).
-//   Examples: 0 = off, 15000 = 15s, 30000 = 30s, 60000 = 1 min
-const EMBED_DISPLAY_TIME_MS = 0; // ← set e.g. 30000 for 30-second auto-skip
-//
-// VALIDATE_TIMEOUT_MS
-//   How long (ms) to wait for /api/validate-embed before giving up and
-//   just showing the iframe anyway. Increase if your server is slow.
-//   Examples: 5000 = 5s (fast), 10000 = 10s, 20000 = 20s (patient)
-const VALIDATE_TIMEOUT_MS = 8000;
-//
+// ── Timeout config ────────────────────────────────────────────────────────
+// How long to wait for /api/validate-embed before just showing the iframe.
+const VALIDATE_TIMEOUT_MS = 5000;
 // ─────────────────────────────────────────────────────────────────────────
 
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
@@ -143,13 +132,12 @@ export function VideoPlayer({
     if (src.type === "m3u8") {
       loadHLS(src.url, src.subtitles);
     } else {
-      // Validate with a hard timeout — if validate-embed takes longer than
-      // VALIDATE_TIMEOUT_MS, just show the iframe anyway.
+      // Validate with a hard timeout — show iframe after VALIDATE_TIMEOUT_MS
+      // regardless of validate-embed result (never leave user on blank spinner)
       setValidating(true);
 
       const validateTimeout = setTimeout(() => {
-        setValidating(false);
-        // Don't skip — just show the iframe. User can switch manually.
+        setValidating(false); // timeout → just show the iframe
       }, VALIDATE_TIMEOUT_MS);
 
       fetch(`/api/validate-embed?url=${encodeURIComponent(src.url)}`)
@@ -158,47 +146,51 @@ export function VideoPlayer({
           clearTimeout(validateTimeout);
           setValidating(false);
           if (!data.valid) {
-            advanceSource(); // confirmed dead → skip silently
+            // Server-side confirmed dead (non-200, SSR error phrase, too small)
+            // → silently skip to next
+            advanceSource();
           }
           // valid → showIframe condition met, iframe renders
         })
         .catch(() => {
           clearTimeout(validateTimeout);
           setValidating(false);
-          // Network error → show iframe anyway, don't skip
+          // Network error on our side → show iframe anyway
         });
-
-      // Auto-advance after EMBED_DISPLAY_TIME_MS (only if > 0)
-      if (EMBED_DISPLAY_TIME_MS > 0) {
-        timerRef.current = setTimeout(() => {
-          advanceSource();
-        }, EMBED_DISPLAY_TIME_MS);
-      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
 
   // ── postMessage from embed players ────────────────────────────────────
+  // IMPORTANT: We intentionally do NOT auto-advance on postMessage errors.
+  // TryEmbed sends "PLAYBACK ERROR. ALL SERVERS UNAVAILABLE" as a postMessage
+  // but the iframe already rendered — user can see it and switch manually.
+  // Auto-advancing on postMessage caused the rapid flicker → error screen issue.
+  // Only HLS fatal errors (m3u8) auto-advance since there's nothing to show.
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
         const data =
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (
-          data?.event  === "error" ||
-          data?.type   === "error" ||
-          data?.status === 404    ||
-          data?.error  === true
-        ) {
-          advanceSource();
+
+        // Only handle non-error events (progress, completion)
+        if (data?.event === "complete") {
+          onEpisodeEnd?.();
           return;
         }
+        if (
+          (data?.event === "time" && data.percent > 0.05) ||
+          (data?.type === "watching-log" && data.currentTime > 30)
+        ) {
+          onProgress?.(episode);
+        }
+        // Error events → ignored intentionally. User sees the iframe error
+        // message and can click a different source button themselves.
       } catch {}
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceIndex]);
+  }, [episode, onEpisodeEnd, onProgress]);
 
   function advanceSource() {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -227,6 +219,7 @@ export function VideoPlayer({
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
+        // Only m3u8 fatal errors auto-advance (nothing visible to user yet)
         hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
           if (data.fatal) advanceSource();
         });
