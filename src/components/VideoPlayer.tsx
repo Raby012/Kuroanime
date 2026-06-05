@@ -8,11 +8,6 @@ import {
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
-// ── Timeout config ────────────────────────────────────────────────────────
-// How long to wait for /api/validate-embed before just showing the iframe.
-const VALIDATE_TIMEOUT_MS = 5000;
-// ─────────────────────────────────────────────────────────────────────────
-
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
   { key: "sub",    label: "SUB",    flag: "🇯🇵" },
   { key: "dub",    label: "DUB",    flag: "🇬🇧" },
@@ -51,27 +46,23 @@ export function VideoPlayer({
   const videoRef  = useRef<HTMLVideoElement>(null);
   const hlsRef    = useRef<unknown>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [language,      setLanguage]      = useState<Language>("sub");
   const [allSources,    setAllSources]    = useState<StreamSource[]>([]);
   const [sourceIndex,   setSourceIndex]   = useState(0);
   const [loading,       setLoading]       = useState(true);
-  const [validating,    setValidating]    = useState(false);
   const [error,         setError]         = useState(false);
   const [providerLabel, setProviderLabel] = useState("");
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
-  // ── Fetch all sources ─────────────────────────────────────────────────
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
-    setValidating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
 
+    // Phase 1 — instant embed sources, no API calls needed
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
@@ -82,6 +73,7 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
+    // Phase 2 — async API sources added as they resolve
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
@@ -98,11 +90,11 @@ export function VideoPlayer({
     apiFetches.forEach((p) =>
       p.then((newSrcs) => {
         if (!newSrcs.length) return;
-        setAllSources((prev: StreamSource[]) => {
-          const seen  = new Set(prev.map((s: StreamSource) => s.url));
-          const fresh = newSrcs.filter((s: StreamSource) => !seen.has(s.url));
-          const m3u8s  = fresh.filter((s: StreamSource) => s.type === "m3u8");
-          const embeds = fresh.filter((s: StreamSource) => s.type === "embed");
+        setAllSources((prev) => {
+          const seen  = new Set(prev.map((s) => s.url));
+          const fresh = newSrcs.filter((s) => !seen.has(s.url));
+          const m3u8s  = fresh.filter((s) => s.type === "m3u8");
+          const embeds = fresh.filter((s) => s.type === "embed");
           return [...m3u8s, ...prev, ...embeds];
         });
       })
@@ -111,96 +103,44 @@ export function VideoPlayer({
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset on language tab change
+  // Reset on language change
   useEffect(() => {
     setSourceIndex(0);
-    setValidating(false);
     setError(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
   }, [language]);
 
-  // ── Load source when index changes ────────────────────────────────────
+  // Load source whenever index changes
   useEffect(() => {
     if (loading || !sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
-
     setProviderLabel(src.provider);
-    setValidating(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-
+    // m3u8 only — embeds render via iframe, nothing to "load" here
     if (src.type === "m3u8") {
       loadHLS(src.url, src.subtitles);
-    } else {
-      // Validate with a hard timeout — show iframe after VALIDATE_TIMEOUT_MS
-      // regardless of validate-embed result (never leave user on blank spinner)
-      setValidating(true);
-
-      const validateTimeout = setTimeout(() => {
-        setValidating(false); // timeout → just show the iframe
-      }, VALIDATE_TIMEOUT_MS);
-
-      fetch(`/api/validate-embed?url=${encodeURIComponent(src.url)}`)
-        .then((r) => r.json())
-        .then((data: { valid: boolean }) => {
-          clearTimeout(validateTimeout);
-          setValidating(false);
-          if (!data.valid) {
-            // Server-side confirmed dead (non-200, SSR error phrase, too small)
-            // → silently skip to next
-            advanceSource();
-          }
-          // valid → showIframe condition met, iframe renders
-        })
-        .catch(() => {
-          clearTimeout(validateTimeout);
-          setValidating(false);
-          // Network error on our side → show iframe anyway
-        });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
 
-  // ── postMessage from embed players ────────────────────────────────────
-  // IMPORTANT: We intentionally do NOT auto-advance on postMessage errors.
-  // TryEmbed sends "PLAYBACK ERROR. ALL SERVERS UNAVAILABLE" as a postMessage
-  // but the iframe already rendered — user can see it and switch manually.
-  // Auto-advancing on postMessage caused the rapid flicker → error screen issue.
-  // Only HLS fatal errors (m3u8) auto-advance since there's nothing to show.
+  // postMessage — only track progress/completion, NEVER auto-advance
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       try {
         const data =
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-
-        // Only handle non-error events (progress, completion)
-        if (data?.event === "complete") {
-          onEpisodeEnd?.();
-          return;
-        }
+        if (data?.event === "complete") onEpisodeEnd?.();
         if (
           (data?.event === "time" && data.percent > 0.05) ||
           (data?.type === "watching-log" && data.currentTime > 30)
         ) {
           onProgress?.(episode);
         }
-        // Error events → ignored intentionally. User sees the iframe error
-        // message and can click a different source button themselves.
+        // ALL error events ignored — user switches source manually
       } catch {}
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [episode, onEpisodeEnd, onProgress]);
-
-  function advanceSource() {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setValidating(false);
-    setSourceIndex((i) => {
-      if (i < sources.length - 1) return i + 1;
-      setError(true);
-      return i;
-    });
-  }
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
     if (typeof window === "undefined") return;
@@ -219,19 +159,22 @@ export function VideoPlayer({
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
-        // Only m3u8 fatal errors auto-advance (nothing visible to user yet)
         hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
-          if (data.fatal) advanceSource();
+          // m3u8 fatal error → try next m3u8 source, but don't touch embed sources
+          if (data.fatal) {
+            const nextIdx = sourceIndex + 1;
+            if (nextIdx < sources.length && sources[nextIdx]?.type === "m3u8") {
+              setSourceIndex(nextIdx);
+            }
+            // if next source is an embed, do nothing — let user pick
+          }
         });
-      } else {
-        advanceSource();
       }
+      // if HLS not supported, do nothing — user picks another source
     }
   }
 
   const currentSource = sources[sourceIndex];
-  const isEmbed    = currentSource?.type === "embed";
-  const showIframe = isEmbed && !validating && !loading && !error && sources.length > 0;
 
   const langCounts = LANGUAGES.reduce(
     (acc, l) => {
@@ -262,13 +205,7 @@ export function VideoPlayer({
               <span>{l.flag}</span>
               <span>{l.label}</span>
               {count > 0 && (
-                <span
-                  className={`text-xs rounded-full px-1 ${
-                    language === l.key
-                      ? "bg-white/20 text-white"
-                      : "bg-white/10 text-gray-400"
-                  }`}
-                >
+                <span className={`text-xs rounded-full px-1 ${language === l.key ? "bg-white/20 text-white" : "bg-white/10 text-gray-400"}`}>
                   {count}
                 </span>
               )}
@@ -279,14 +216,10 @@ export function VideoPlayer({
 
       {/* Player */}
       <div className="w-full aspect-video bg-black rounded-xl overflow-hidden relative">
-        {loading || validating ? (
+        {loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <Loader2 className="text-brand animate-spin" size={32} />
-            <p className="text-gray-400 text-sm">
-              {validating
-                ? `Checking ${providerLabel}…`
-                : `Finding stream for episode ${episode}…`}
-            </p>
+            <p className="text-gray-400 text-sm">Finding stream for episode {episode}…</p>
           </div>
         ) : error || sources.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-4">
@@ -304,7 +237,7 @@ export function VideoPlayer({
               <RefreshCw size={14} /> Retry
             </button>
           </div>
-        ) : showIframe && currentSource ? (
+        ) : currentSource?.type === "embed" ? (
           <iframe
             ref={iframeRef}
             key={`${currentSource.url}-${sourceIndex}-${language}`}
@@ -330,16 +263,13 @@ export function VideoPlayer({
       {/* Source label + manual switcher */}
       <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
         <span className="text-xs text-gray-500 shrink-0">
-          Source:{" "}
-          <span className="text-brand font-medium">{providerLabel}</span>
+          Source: <span className="text-brand font-medium">{providerLabel}</span>
         </span>
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
           {sources.map((s, i) => (
             <button
               key={i}
               onClick={() => {
-                if (timerRef.current) clearTimeout(timerRef.current);
-                setValidating(false);
                 setError(false);
                 setSourceIndex(i);
               }}
