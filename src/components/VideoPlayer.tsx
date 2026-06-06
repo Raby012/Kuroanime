@@ -44,30 +44,40 @@ export function VideoPlayer({
   onEpisodeEnd,
   onProgress,
 }: VideoPlayerProps) {
-  const videoRef   = useRef<HTMLVideoElement>(null);
-  const hlsRef     = useRef<unknown>(null);
-  const iframeRef  = useRef<HTMLIFrameElement>(null);
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const hlsRef    = useRef<unknown>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const [language,       setLanguage]      = useState<Language>("sub");
-  const [allSources,     setAllSources]    = useState<StreamSource[]>([]);
-  const [sourceIndex,    setSourceIndex]   = useState(0);
-  const [loading,        setLoading]       = useState(true);
-  const [error,          setError]         = useState(false);
-  const [providerLabel,  setProviderLabel] = useState("");
+  const [language,      setLanguage]      = useState<Language>("sub");
+  const [allSources,    setAllSources]    = useState<StreamSource[]>([]);
+  const [sourceIndex,   setSourceIndex]   = useState(0);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState(false);
+  const [providerLabel, setProviderLabel] = useState("");
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
-  // ── Fetch all sources ─────────────────────────────────────────────────
+  const addUnique = useCallback((newSrcs: StreamSource[], prepend = false) => {
+    setAllSources((prev) => {
+      const seen = new Set(prev.map((s) => s.url));
+      const fresh = newSrcs.filter((s) => !seen.has(s.url));
+      if (!fresh.length) return prev;
+      return prepend ? [...fresh, ...prev] : [...prev, ...fresh];
+    });
+  }, []);
+
   const fetchSources = useCallback(async () => {
     setLoading(true);
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
 
-    // Phase 1: instant embed sources (no API calls needed)
+    // ── Phase 1: instant fallback sources ────────────────────────────────
+    // These show immediately. They work for mapped anime.
+    // The Anikoto resolver (Phase 2) will prepend better sources when ready.
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
-      ...getIndianDubSources(anilistId, episode, isMovie, malId), // VidNest + NHDapi Hindi/Tamil/Telugu
+      ...getIndianDubSources(anilistId, episode, isMovie, malId),
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
       ...(imdbId || tmdbId
         ? getEmbedSources(imdbId ?? null, tmdbId ?? null, season, episode, isMovie)
@@ -76,82 +86,112 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
-    // Phase 2: async m3u8 + MegaPlay s-2 sources (background)
+    // ── Phase 2: Anikoto resolver — the REAL fix ──────────────────────────
+    // /api/anikoto/[anilistId] searches Anikoto by title, fetches the full
+    // episode list with episode_embed_id, returns /stream/s-2/ URLs.
+    // These work for the FULL library, not just mapped anime.
+    // Cached for 1 hour on Vercel's CDN — super fast after first load.
+    try {
+      const anikotoRes = await fetch(`/api/anikoto/${anilistId}`, {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (anikotoRes.ok) {
+        const data = await anikotoRes.json() as {
+          found: boolean;
+          episodes: { number: number; sub: string | null; dub: string | null }[];
+        };
+        if (data.found && data.episodes?.length) {
+          const ep = data.episodes.find((e) => e.number === episode);
+          if (ep) {
+            const anikotoSources: StreamSource[] = [];
+            if (ep.sub) anikotoSources.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
+            if (ep.dub) anikotoSources.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
+            // Prepend — these are the best sources, put them first
+            if (anikotoSources.length) addUnique(anikotoSources, true);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Anikoto resolver failed:", e);
+    }
+
+    // ── Phase 3: async m3u8 + extra embed sources (background) ───────────
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
-    const apiFetches: Promise<StreamSource[]>[] = [
-      fetch(`${base}&provider=megaplay`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
-      fetch(`${base}&provider=hianime`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
-      fetch(`${base}&provider=anikoto`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
-      fetch(`${base}${seasonQ}&provider=tmdb`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => [] as StreamSource[]),
-      fetch(`${base}&provider=gogoanime`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => [] as StreamSource[]),
-      fetch(`${base}&provider=animepahe`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => [] as StreamSource[]),
+    const asyncFetches: Promise<StreamSource[]>[] = [
+      // HiAnime m3u8 — real video stream
+      fetch(`${base}&provider=hianime`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      // Anikoto m3u8 — real video stream
+      fetch(`${base}&provider=anikoto`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      // TMDB extra embeds
+      fetch(`${base}${seasonQ}&provider=tmdb`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      // GogoAnime m3u8
+      fetch(`${base}&provider=gogoanime`)
+        .then((r) => r.json())
+        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
+        .catch(() => []),
+      // AnimePahe m3u8
+      fetch(`${base}&provider=animepahe`)
+        .then((r) => r.json())
+        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
+        .catch(() => []),
     ];
 
-    apiFetches.forEach((p) =>
+    // Add each as it resolves — m3u8 go to front
+    asyncFetches.forEach((p) =>
       p.then((newSrcs) => {
         if (!newSrcs.length) return;
-        setAllSources((prev: StreamSource[]) => {
-          const seen = new Set(prev.map((s: StreamSource) => s.url));
-          const fresh = newSrcs.filter((s: StreamSource) => !seen.has(s.url));
-          const m3u8s  = fresh.filter((s: StreamSource) => s.type === "m3u8");
-          const embeds = fresh.filter((s: StreamSource) => s.type === "embed");
-          return [...m3u8s, ...prev, ...embeds];
-        });
+        const m3u8s  = newSrcs.filter((s) => s.type === "m3u8");
+        const embeds = newSrcs.filter((s) => s.type === "embed");
+        if (m3u8s.length)  addUnique(m3u8s, true);   // prepend m3u8
+        if (embeds.length) addUnique(embeds, false);  // append embeds
       })
     );
-  }, [animeTitle, anilistId, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie]);
+  }, [anilistId, animeTitle, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie, addUnique]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset on language tab change
+  // Reset when language tab changes
   useEffect(() => {
     setSourceIndex(0);
     setError(false);
   }, [language]);
 
-  // ── Load source when index changes ────────────────────────────────────
+  // Load source when index changes
   useEffect(() => {
     if (loading || !sources.length) return;
     const src = sources[sourceIndex];
     if (!src) { setError(true); return; }
-
     setProviderLabel(src.provider);
-    if (src.type === "m3u8") {
-      loadHLS(src.url, src.subtitles);
-    }
-    // Embed: just show it. No auto-skip, no validation. User picks manually.
+    if (src.type === "m3u8") loadHLS(src.url, src.subtitles);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
 
-  // ── postMessage — only for progress/complete tracking, no auto-skip ──
+  // postMessage — progress/complete tracking only (no auto-skip)
   useEffect(() => {
-    function handleMessage(event: MessageEvent) {
+    function onMessage(event: MessageEvent) {
       try {
-        const data =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (data?.event === "complete") onEpisodeEnd?.();
-        if (
-          (data?.event === "time" && (data.percent ?? 0) > 0.05) ||
-          (data?.type === "watching-log" && (data.currentTime ?? 0) > 30)
-        ) {
+        const d = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (d?.event === "complete") onEpisodeEnd?.();
+        if ((d?.event === "time" && (d.percent ?? 0) > 0.05) ||
+            (d?.type === "watching-log" && (d.currentTime ?? 0) > 30)) {
           onProgress?.(episode);
         }
       } catch {}
     }
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, [episode, onEpisodeEnd, onProgress]);
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
     if (typeof window === "undefined") return;
     const video = videoRef.current;
     if (!video) return;
-    if (hlsRef.current) {
-      (hlsRef.current as { destroy: () => void }).destroy();
-      hlsRef.current = null;
-    }
+    if (hlsRef.current) { (hlsRef.current as { destroy: () => void }).destroy(); hlsRef.current = null; }
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
     } else {
@@ -162,29 +202,19 @@ export function VideoPlayer({
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
-          if (data.fatal) {
-            // HLS fatal error — do nothing, user sees the error state naturally
-            console.error("HLS fatal error");
-          }
+          if (data.fatal) console.error("HLS fatal error");
         });
-      } else {
-        // HLS not supported — nothing to do
-        console.warn("HLS not supported in this browser");
       }
     }
   }
 
   const currentSource = sources[sourceIndex];
-  const isEmbed    = currentSource?.type === "embed";
-  const showIframe = isEmbed && !loading && !error && sources.length > 0;
+  const isEmbed = currentSource?.type === "embed";
 
-  const langCounts = LANGUAGES.reduce(
-    (acc, l) => {
-      acc[l.key] = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
-      return acc;
-    },
-    {} as Record<Language, number>
-  );
+  const langCounts = LANGUAGES.reduce((acc, l) => {
+    acc[l.key] = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
+    return acc;
+  }, {} as Record<Language, number>);
 
   return (
     <div className="w-full">
@@ -192,6 +222,9 @@ export function VideoPlayer({
       <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-1">
         {LANGUAGES.map((l) => {
           const count = langCounts[l.key] || 0;
+          const isIndian = ["hindi", "tamil", "telugu"].includes(l.key);
+          // Hide Indian tabs when no sources and not loading
+          if (isIndian && count === 0 && !loading) return null;
           return (
             <button
               key={l.key}
@@ -207,13 +240,7 @@ export function VideoPlayer({
               <span>{l.flag}</span>
               <span>{l.label}</span>
               {count > 0 && (
-                <span
-                  className={`text-xs rounded-full px-1 ${
-                    language === l.key
-                      ? "bg-white/20 text-white"
-                      : "bg-white/10 text-gray-400"
-                  }`}
-                >
+                <span className={`text-xs rounded-full px-1 ${language === l.key ? "bg-white/20 text-white" : "bg-white/10 text-gray-400"}`}>
                   {count}
                 </span>
               )}
@@ -245,7 +272,7 @@ export function VideoPlayer({
               <RefreshCw size={14} /> Retry
             </button>
           </div>
-        ) : showIframe && currentSource ? (
+        ) : isEmbed && currentSource ? (
           <iframe
             ref={iframeRef}
             key={`${currentSource.url}-${sourceIndex}-${language}`}
@@ -271,17 +298,13 @@ export function VideoPlayer({
       {/* Source label + manual switcher */}
       <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
         <span className="text-xs text-gray-500 shrink-0">
-          Source:{" "}
-          <span className="text-brand font-medium">{providerLabel}</span>
+          Source: <span className="text-brand font-medium">{providerLabel}</span>
         </span>
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
           {sources.map((s, i) => (
             <button
               key={i}
-              onClick={() => {
-                setError(false);
-                setSourceIndex(i);
-              }}
+              onClick={() => { setError(false); setSourceIndex(i); }}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors shrink-0 ${
                 i === sourceIndex
                   ? "bg-brand text-white"
