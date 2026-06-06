@@ -8,7 +8,6 @@ import {
 } from "@/lib/embed-sources";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
-// Only SUB and DUB. DUB tab is hidden until Anikoto resolver confirms hasDub.
 const LANGUAGES: { key: Language; label: string; flag: string }[] = [
   { key: "sub", label: "SUB", flag: "🇯🇵" },
   { key: "dub", label: "DUB", flag: "🇬🇧" },
@@ -51,14 +50,14 @@ export function VideoPlayer({
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState(false);
   const [providerLabel, setProviderLabel] = useState("");
-  // hasDub: null = unknown (resolver still loading), false = no dub, true = has dub
+  // null = still checking | true = confirmed dub | false = no dub
   const [hasDub,        setHasDub]        = useState<boolean | null>(null);
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
   const addUnique = useCallback((newSrcs: StreamSource[], prepend = false) => {
     setAllSources((prev) => {
-      const seen = new Set(prev.map((s) => s.url));
+      const seen  = new Set(prev.map((s) => s.url));
       const fresh = newSrcs.filter((s) => !seen.has(s.url));
       if (!fresh.length) return prev;
       return prepend ? [...fresh, ...prev] : [...prev, ...fresh];
@@ -70,11 +69,12 @@ export function VideoPlayer({
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
-    setHasDub(null); // unknown until resolver responds
+    setHasDub(null);
 
-    // ── Phase 1: instant SUB-only sources ────────────────────────────────
-    // DUB sources are NOT added here — we wait for the Anikoto resolver
-    // to confirm whether a dub actually exists before showing the DUB tab.
+    // ── Phase 1: instant SUB sources + optimistic DUB fallbacks ──────────
+    // We show DUB tab immediately with MegaPlay/MAL fallback URLs.
+    // These might show a 404 page for unmapped anime — user sees it and
+    // can switch source manually. Better than hiding DUB completely.
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
@@ -84,16 +84,16 @@ export function VideoPlayer({
     ];
     setAllSources(instant);
     setLoading(false);
+    // Show DUB tab immediately — Anikoto resolver will confirm or remove it
+    setHasDub(null);
 
-    // ── Phase 2: Anikoto resolver — confirms sub + dub availability ───────
-    // Returns episode_embed_id based /stream/s-2/ URLs (full library).
-    // Also tells us whether this anime has an English dub at all (hasDub).
+    // ── Phase 2: Anikoto resolver — replaces fallback URLs with real ones ─
     try {
-      const anikotoRes = await fetch(`/api/anikoto/${anilistId}`, {
+      const res = await fetch(`/api/anikoto/${anilistId}`, {
         signal: AbortSignal.timeout(15000),
       });
-      if (anikotoRes.ok) {
-        const data = await anikotoRes.json() as {
+      if (res.ok) {
+        const data = await res.json() as {
           found: boolean;
           hasDub: boolean;
           episodes: { number: number; sub: string | null; dub: string | null }[];
@@ -102,84 +102,56 @@ export function VideoPlayer({
         if (data.found && data.episodes?.length) {
           const ep = data.episodes.find((e) => e.number === episode);
           if (ep) {
-            const anikotoSources: StreamSource[] = [];
-            // Always add sub
-            if (ep.sub) anikotoSources.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
-            // Only add dub sources if this anime actually has a dub
-            if (ep.dub && data.hasDub) {
-              anikotoSources.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
-              // Also add MAL/AniList dub fallbacks now that we know dub exists
-              if (malId) addUnique([
-                { type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep.number}/dub`, provider: "MegaPlay MAL Dub", lang: "dub" },
-              ], false);
-              addUnique([
-                { type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep.number}/dub`, provider: "MegaPlay Dub", lang: "dub" },
-                { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep.number}/dub`, provider: "VidNest Dub", lang: "dub" },
-              ], false);
+            const anikotoSrcs: StreamSource[] = [];
+            if (ep.sub) anikotoSrcs.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
+            if (ep.dub) anikotoSrcs.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
+            // Also add VidNest/NHDapi dub if anime has dub
+            if (data.hasDub) {
+              anikotoSrcs.push({ type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${episode}/dub`, provider: "VidNest Dub", lang: "dub" });
             }
-            if (anikotoSources.length) addUnique(anikotoSources, true);
+            if (anikotoSrcs.length) addUnique(anikotoSrcs, true);
           }
-          // Set hasDub based on what Anikoto knows
-          setHasDub(data.hasDub ?? false);
+          setHasDub(data.hasDub);
         } else {
-          // Resolver found nothing — no dub confirmation possible
-          setHasDub(false);
+          // Anikoto doesn't have this anime — keep showing DUB tab with
+          // the MAL/AniList fallback sources that are already loaded
+          setHasDub(true); // keep tab visible, let user try
         }
       } else {
-        setHasDub(false);
+        setHasDub(true); // resolver failed — keep DUB tab visible
       }
-    } catch (e) {
-      console.error("Anikoto resolver failed:", e);
-      setHasDub(false);
+    } catch {
+      setHasDub(true); // network error — keep DUB tab visible
     }
 
-    // ── Phase 3: async m3u8 + extra embed sources (background) ───────────
+    // ── Phase 3: async m3u8 + extra embeds ───────────────────────────────
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
     const asyncFetches: Promise<StreamSource[]>[] = [
-      // HiAnime m3u8 — real video stream
-      fetch(`${base}&provider=hianime`)
-        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      // Anikoto m3u8 — real video stream
-      fetch(`${base}&provider=anikoto`)
-        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      // TMDB extra embeds
-      fetch(`${base}${seasonQ}&provider=tmdb`)
-        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      // GogoAnime m3u8
-      fetch(`${base}&provider=gogoanime`)
-        .then((r) => r.json())
-        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
-        .catch(() => []),
-      // AnimePahe m3u8
-      fetch(`${base}&provider=animepahe`)
-        .then((r) => r.json())
-        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
-        .catch(() => []),
+      fetch(`${base}&provider=hianime`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      fetch(`${base}&provider=anikoto`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      fetch(`${base}${seasonQ}&provider=tmdb`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      fetch(`${base}&provider=gogoanime`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => []),
+      fetch(`${base}&provider=animepahe`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => []),
     ];
 
-    // Add each as it resolves — m3u8 go to front
-    asyncFetches.forEach((p) =>
-      p.then((newSrcs) => {
-        if (!newSrcs.length) return;
-        const m3u8s  = newSrcs.filter((s) => s.type === "m3u8");
-        const embeds = newSrcs.filter((s) => s.type === "embed");
-        if (m3u8s.length)  addUnique(m3u8s, true);   // prepend m3u8
-        if (embeds.length) addUnique(embeds, false);  // append embeds
-      })
-    );
+    asyncFetches.forEach((p) => p.then((newSrcs) => {
+      if (!newSrcs.length) return;
+      const m3u8s  = newSrcs.filter((s) => s.type === "m3u8");
+      const embeds = newSrcs.filter((s) => s.type === "embed");
+      if (m3u8s.length)  addUnique(m3u8s, true);
+      if (embeds.length) addUnique(embeds, false);
+    }));
   }, [anilistId, animeTitle, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie, addUnique]);
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
 
-  // Reset when language tab changes
   useEffect(() => {
     setSourceIndex(0);
     setError(false);
   }, [language]);
 
-  // Load source when index changes
   useEffect(() => {
     if (loading || !sources.length) return;
     const src = sources[sourceIndex];
@@ -189,20 +161,18 @@ export function VideoPlayer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, sourceIndex, loading]);
 
-  // postMessage — progress/complete tracking only (no auto-skip)
   useEffect(() => {
-    function onMessage(event: MessageEvent) {
+    function onMsg(e: MessageEvent) {
       try {
-        const d = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        const d = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
         if (d?.event === "complete") onEpisodeEnd?.();
         if ((d?.event === "time" && (d.percent ?? 0) > 0.05) ||
-            (d?.type === "watching-log" && (d.currentTime ?? 0) > 30)) {
+            (d?.type === "watching-log" && (d.currentTime ?? 0) > 30))
           onProgress?.(episode);
-        }
       } catch {}
     }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
   }, [episode, onEpisodeEnd, onProgress]);
 
   async function loadHLS(url: string, subtitles?: { url: string; lang: string }[]) {
@@ -227,7 +197,7 @@ export function VideoPlayer({
   }
 
   const currentSource = sources[sourceIndex];
-  const isEmbed = currentSource?.type === "embed";
+  const isEmbed       = currentSource?.type === "embed";
 
   return (
     <div className="w-full">
@@ -236,25 +206,20 @@ export function VideoPlayer({
         {LANGUAGES.map((l) => {
           const count = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
 
-          // DUB tab logic:
-          // - hasDub === null: resolver still loading — show greyed out with spinner
-          // - hasDub === false: confirmed no dub — hide tab completely
-          // - hasDub === true: confirmed has dub — show with count
+          // DUB tab rendering
           if (l.key === "dub") {
-            if (hasDub === false) return null; // confirmed no dub, hide
+            // Still loading resolver — show spinner placeholder
             if (hasDub === null) {
-              // Still checking — show a disabled placeholder so layout doesn't jump
               return (
-                <div
-                  key={l.key}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 border bg-surface-1 text-gray-700 border-white/5 cursor-wait"
-                >
+                <div key="dub" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 border bg-surface-1 text-gray-600 border-white/5">
                   <span>{l.flag}</span>
                   <span>{l.label}</span>
-                  <Loader2 size={10} className="animate-spin opacity-50" />
+                  <Loader2 size={10} className="animate-spin opacity-40" />
                 </div>
               );
             }
+            // Confirmed no dub — hide completely
+            if (hasDub === false) return null;
           }
 
           return (
@@ -294,13 +259,8 @@ export function VideoPlayer({
             <p className="text-white font-medium text-center">
               No {LANGUAGES.find((l) => l.key === language)?.label} stream available
             </p>
-            <p className="text-gray-400 text-sm text-center max-w-xs">
-              Try a different language or source above.
-            </p>
-            <button
-              onClick={fetchSources}
-              className="flex items-center gap-2 bg-brand hover:bg-brand-dark text-white px-4 py-2 rounded-lg text-sm transition-colors"
-            >
+            <p className="text-gray-400 text-sm text-center max-w-xs">Try a different source above.</p>
+            <button onClick={fetchSources} className="flex items-center gap-2 bg-brand hover:bg-brand-dark text-white px-4 py-2 rounded-lg text-sm transition-colors">
               <RefreshCw size={14} /> Retry
             </button>
           </div>
@@ -318,16 +278,14 @@ export function VideoPlayer({
           <video
             ref={videoRef}
             className="w-full h-full"
-            controls
-            autoPlay
-            playsInline
+            controls autoPlay playsInline
             onEnded={onEpisodeEnd}
             onPlay={() => onProgress?.(episode)}
           />
         ) : null}
       </div>
 
-      {/* Source label + manual switcher */}
+      {/* Source switcher */}
       <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
         <span className="text-xs text-gray-500 shrink-0">
           Source: <span className="text-brand font-medium">{providerLabel}</span>
@@ -338,9 +296,7 @@ export function VideoPlayer({
               key={i}
               onClick={() => { setError(false); setSourceIndex(i); }}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors shrink-0 ${
-                i === sourceIndex
-                  ? "bg-brand text-white"
-                  : "bg-surface-2 text-gray-400 hover:text-white"
+                i === sourceIndex ? "bg-brand text-white" : "bg-surface-2 text-gray-400 hover:text-white"
               }`}
             >
               {s.provider}
