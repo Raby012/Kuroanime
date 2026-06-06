@@ -139,11 +139,13 @@ export async function GET(
     // Fetch all episodes with embed URLs
     const episodes = await fetchEpisodes(anikotoId);
 
+    // hasDub = true if ANY episode has a dub URL
+    const hasDub = episodes.some((e) => e.dub !== null);
+
     return NextResponse.json(
-      { episodes, anikotoId, found: true },
+      { episodes, anikotoId, found: true, hasDub },
       {
         headers: {
-          // Cache in CDN for 1 hour, stale-while-revalidate for 4 hours
           "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=14400",
         },
       }
