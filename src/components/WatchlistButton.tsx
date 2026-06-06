@@ -1,118 +1,98 @@
+// src/components/WatchlistButton.tsx — replace existing WatchlistButton
 "use client";
-import { useState, useEffect } from "react";
-import { BookMarked, Plus, Check, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import toast from "react-hot-toast";
+import { useRouter } from "next/navigation";
+import { Bookmark, BookmarkCheck, Loader2, ChevronDown } from "lucide-react";
 
-type WatchStatus = "PLANNING" | "WATCHING" | "COMPLETED" | "DROPPED";
-
-const STATUS_OPTIONS: { value: WatchStatus; label: string }[] = [
-  { value: "WATCHING", label: "Watching" },
-  { value: "COMPLETED", label: "Completed" },
-  { value: "PLANNING", label: "Plan to Watch" },
-  { value: "DROPPED", label: "Dropped" },
+const STATUSES = [
+  { value: "plan_to_watch", label: "Plan to Watch" },
+  { value: "watching",      label: "Watching"      },
+  { value: "completed",     label: "Completed"     },
+  { value: "on_hold",       label: "On Hold"       },
+  { value: "dropped",       label: "Dropped"       },
 ];
 
-interface WatchlistButtonProps {
-  anilistId: number;
-  title: string;
-  image: string;
-}
+interface Props { anilistId: number; title: string; image?: string; }
 
-export function WatchlistButton({ anilistId, title, image }: WatchlistButtonProps) {
+export function WatchlistButton({ anilistId, title, image }: Props) {
   const { data: session } = useSession();
-  const [status, setStatus] = useState<WatchStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const [status,   setStatus]   = useState<string | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [open,     setOpen]     = useState(false);
+  const [saving,   setSaving]   = useState(false);
 
   useEffect(() => {
-    if (!session) return;
-    fetch("/api/watchlist")
-      .then((r) => r.json())
-      .then((list) => {
-        const item = list.find((i: { anilistId: number; status: string }) => i.anilistId === anilistId);
-        if (item) setStatus(item.status);
-      })
-      .catch(() => {});
+    if (!session) { setLoading(false); return; }
+    fetch(`/api/watchlist?id=${anilistId}`).then((r) => r.json()).then((d) => {
+      setStatus(d.item?.status ?? null);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [session, anilistId]);
 
-  async function handleSelect(newStatus: WatchStatus) {
-    if (!session) { toast.error("Sign in to track anime"); return; }
-    setLoading(true);
-    try {
-      await fetch("/api/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anilistId, title, image, status: newStatus }),
-      });
-      setStatus(newStatus);
-      toast.success(`Added to ${newStatus.toLowerCase().replace("_", " ")}`);
-    } catch {
-      toast.error("Failed to update watchlist");
-    }
-    setLoading(false);
-    setOpen(false);
+  async function setStatusValue(val: string) {
+    if (!session) { router.push("/auth/signin"); return; }
+    setSaving(true); setOpen(false);
+    await fetch("/api/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anilistId, title, image, status: val }),
+    });
+    setStatus(val);
+    setSaving(false);
   }
 
-  async function handleRemove() {
-    setLoading(true);
-    try {
-      await fetch(`/api/watchlist?anilistId=${anilistId}`, { method: "DELETE" });
-      setStatus(null);
-      toast.success("Removed from watchlist");
-    } catch {
-      toast.error("Failed to remove");
-    }
-    setLoading(false);
-    setOpen(false);
+  async function remove() {
+    setSaving(true); setOpen(false);
+    await fetch("/api/watchlist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anilistId }),
+    });
+    setStatus(null);
+    setSaving(false);
   }
+
+  const currentLabel = STATUSES.find((s) => s.value === status)?.label;
 
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium transition-all ${
-          status
-            ? "bg-surface-2 border border-brand/50 text-brand hover:bg-surface-3"
-            : "bg-surface-2 border border-white/10 text-gray-300 hover:border-brand/30 hover:text-white"
-        }`}
-        disabled={loading}
-      >
-        {loading ? (
-          <Loader2 size={15} className="animate-spin" />
-        ) : status ? (
-          <Check size={15} />
-        ) : (
-          <Plus size={15} />
+      <div className="flex gap-1">
+        <button
+          onClick={() => !status ? setStatusValue("plan_to_watch") : setOpen(!open)}
+          disabled={loading || saving}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+            status
+              ? "bg-brand text-white"
+              : "bg-surface-2 border border-white/10 text-gray-300 hover:border-brand/50 hover:text-white"
+          }`}
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : status ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+          {status ? currentLabel : "Add to List"}
+        </button>
+        {status && (
+          <button onClick={() => setOpen(!open)}
+            className="bg-brand text-white px-2 py-2 rounded-xl transition-all hover:bg-brand-dark">
+            <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
         )}
-        {status
-          ? STATUS_OPTIONS.find((o) => o.value === status)?.label || "In List"
-          : "Add to List"}
-        <BookMarked size={14} className="ml-auto opacity-60" />
-      </button>
+      </div>
 
       {open && (
-        <div className="absolute top-12 left-0 right-0 glass rounded-xl overflow-hidden z-20 shadow-xl">
-          {STATUS_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => handleSelect(opt.value)}
-              className={`w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-surface-2 flex items-center justify-between ${
-                status === opt.value ? "text-brand" : "text-gray-300"
-              }`}
-            >
-              {opt.label}
-              {status === opt.value && <Check size={14} />}
+        <div className="absolute left-0 top-full mt-1 w-44 bg-surface-1 border border-white/10 rounded-xl shadow-2xl py-1 z-50">
+          {STATUSES.map((s) => (
+            <button key={s.value} onClick={() => setStatusValue(s.value)}
+              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                status === s.value ? "text-brand bg-brand/10" : "text-gray-300 hover:text-white hover:bg-white/5"
+              }`}>
+              {s.label}
             </button>
           ))}
-          {status && (
-            <button
-              onClick={handleRemove}
-              className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-surface-2 border-t border-white/10 transition-colors"
-            >
-              Remove from list
-            </button>
-          )}
+          <div className="h-px bg-white/8 my-1" />
+          <button onClick={remove} className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
+            Remove from List
+          </button>
         </div>
       )}
     </div>
