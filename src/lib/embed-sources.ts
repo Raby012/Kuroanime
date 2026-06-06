@@ -2,12 +2,12 @@ export type StreamSource =
   | { type: "m3u8"; url: string; subtitles?: { url: string; lang: string }[]; provider: string; lang?: string }
   | { type: "embed"; url: string; provider: string; lang?: string };
 
-export type Language = "sub" | "dub" | "hindi" | "tamil" | "telugu";
+export type Language = "sub" | "dub";
 
-// ── Instant fallback sources (show while Anikoto resolver loads) ──────────────
-// These are the /ani/ and /mal/ URL formats which work for MAPPED anime.
-// The real working sources come from /api/anikoto/[anilistId] which returns
-// the correct /stream/s-2/{embedId}/ URLs that cover the FULL library.
+// ── SUB sources only (instant, no API call) ───────────────────────────────────
+// DUB sources are NOT added here — they only get added after the Anikoto
+// resolver confirms the anime actually has an English dub (hasDub: true).
+// This prevents the DUB tab showing for anime with no English dub.
 
 export function getAnilistEmbedSources(
   anilistId: number,
@@ -17,40 +17,15 @@ export function getAnilistEmbedSources(
 ): StreamSource[] {
   const ep = isMovie ? 1 : episode;
   const sources: StreamSource[] = [
-    // MegaPlay AniList — works for mapped anime (instant, no API call)
+    // SUB only — MegaPlay via AniList ID
     { type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/sub`, provider: "MegaPlay Sub", lang: "sub" },
-    { type: "embed", url: `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/dub`, provider: "MegaPlay Dub", lang: "dub" },
-    // VidNest fallback
+    // SUB — VidNest fallback
     { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/sub`, provider: "VidNest Sub", lang: "sub" },
-    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/dub`, provider: "VidNest Dub", lang: "dub" },
   ];
   if (malId) {
     sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/sub`, provider: "MegaPlay MAL Sub", lang: "sub" });
-    sources.push({ type: "embed", url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/dub`, provider: "MegaPlay MAL Dub", lang: "dub" });
   }
   return sources;
-}
-
-export function getIndianDubSources(
-  anilistId: number,
-  episode: number,
-  isMovie: boolean,
-  malId?: number | null
-): StreamSource[] {
-  const ep = isMovie ? 1 : episode;
-  return [
-    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/hindi`,  provider: "VidNest हिंदी",  lang: "hindi"  },
-    { type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/hindi`,   provider: "NHDapi हिंदी",   lang: "hindi"  },
-    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/tamil`,  provider: "VidNest தமிழ்", lang: "tamil"  },
-    { type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/tamil`,   provider: "NHDapi தமிழ்",  lang: "tamil"  },
-    { type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${ep}/telugu`, provider: "VidNest తెలుగు", lang: "telugu" },
-    { type: "embed", url: `https://nhdapi.xyz/anime/${anilistId}/${ep}/telugu`,  provider: "NHDapi తెలుగు", lang: "telugu" },
-    ...(malId ? [
-      { type: "embed" as const, url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/hindi`,  provider: "MegaPlay हिंदी",  lang: "hindi"  },
-      { type: "embed" as const, url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/tamil`,  provider: "MegaPlay தமிழ்", lang: "tamil"  },
-      { type: "embed" as const, url: `https://megaplay.buzz/stream/mal/${malId}/${ep}/telugu`, provider: "MegaPlay తెలుగు", lang: "telugu" },
-    ] : []),
-  ];
 }
 
 export function getMalEmbedSources(malId: number | null, episode: number, isMovie: boolean): StreamSource[] {
