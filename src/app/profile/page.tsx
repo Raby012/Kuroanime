@@ -16,7 +16,7 @@ export default async function ProfilePage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/");
 
-  const watchlist = await prisma.watchlist.findMany({
+  const watchlist = await prisma.watchlistItem.findMany({
     where: { userId: session.user.id },
     orderBy: { updatedAt: "desc" },
   });
