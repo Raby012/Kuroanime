@@ -62,12 +62,14 @@ export default function BrowseClient() {
   const [page,       setPage]       = useState(1);
   const [hasMore,    setHasMore]    = useState(true);
   const [loading,    setLoading]    = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const activeFilters = genres.length + (format?1:0) + (season?1:0) + (year?1:0) + (status?1:0);
 
   const fetchAnimes = useCallback(async (reset: boolean, currentPage: number) => {
     setLoading(true);
+    setFetchError(false);
     const variables: Record<string, unknown> = {
       page: currentPage,
       perPage: 24,
@@ -76,20 +78,33 @@ export default function BrowseClient() {
     if (search.trim())  variables.search     = search.trim();
     if (genres.length)  variables.genres     = genres;
     if (format)         variables.format     = format;
-    if (season)         variables.season     = season;
+    if (season)         variables.season     = season.toUpperCase();
     if (year)           variables.seasonYear = parseInt(year);
     if (status)         variables.status     = status;
 
     try {
-      const res  = await fetch("https://graphql.anilist.co", {
+      const res = await fetch("https://graphql.anilist.co", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
         body: JSON.stringify({ query: BROWSE_QUERY, variables }),
       });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const json = await res.json();
+
+      if (json.errors) {
+        console.error("AniList errors:", json.errors);
+        throw new Error(json.errors[0]?.message || "AniList error");
+      }
+
       const media    = (json.data?.Page?.media ?? []) as Anime[];
       const pageInfo = json.data?.Page?.pageInfo;
       setHasMore(pageInfo?.hasNextPage ?? false);
+
       if (reset) {
         setAnimes(media);
         setPage(2);
@@ -102,6 +117,7 @@ export default function BrowseClient() {
       }
     } catch (e) {
       console.error("Browse fetch error:", e);
+      setFetchError(true);
     }
     setLoading(false);
   }, [search, genres, format, season, year, status, sort]);
@@ -113,7 +129,7 @@ export default function BrowseClient() {
       fetchAnimes(true, 1);
     }, search ? 400 : 0);
     return () => clearTimeout(searchTimer.current);
-  }, [search, genres, format, season, year, status, sort]);
+  }, [search, genres, format, season, year, status, sort, fetchAnimes]);
 
   function toggleGenre(g: string) {
     setGenres((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
@@ -126,7 +142,6 @@ export default function BrowseClient() {
   return (
     <div className="min-h-screen bg-surface">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Header */}
         <h1 className="font-display text-2xl text-white mb-5">BROWSE ANIME</h1>
 
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -177,8 +192,6 @@ export default function BrowseClient() {
                 </button>
               )}
             </div>
-
-            {/* Genres */}
             <div>
               <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Genres</p>
               <div className="flex flex-wrap gap-1.5">
@@ -194,8 +207,6 @@ export default function BrowseClient() {
                 ))}
               </div>
             </div>
-
-            {/* Row filters */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: "FORMAT", value: format, setter: setFormat, options: FORMATS, labels: null },
@@ -233,30 +244,40 @@ export default function BrowseClient() {
           </div>
         )}
 
+        {/* Error state */}
+        {fetchError && (
+          <div className="text-center py-12">
+            <p className="text-gray-500 mb-3">Failed to load anime. Check your connection.</p>
+            <button onClick={() => fetchAnimes(true, 1)}
+              className="bg-brand text-white px-4 py-2 rounded-xl text-sm">
+              Try Again
+            </button>
+          </div>
+        )}
+
         {/* Results count */}
-        {!loading && animes.length > 0 && (
+        {!loading && !fetchError && animes.length > 0 && (
           <p className="text-xs text-gray-600 mb-3">{animes.length} results</p>
         )}
 
         {/* Grid */}
-        {animes.length === 0 && !loading ? (
+        {!fetchError && animes.length === 0 && !loading ? (
           <div className="text-center py-24 text-gray-600">
             <Search size={36} className="mx-auto mb-3 opacity-30" />
             <p>No anime found</p>
             <p className="text-sm mt-1">Try adjusting your filters</p>
           </div>
-        ) : (
+        ) : !fetchError ? (
           <>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3">
               {animes.map((anime) => (
                 <AnimeCard key={anime.id} anime={anime as any} size="sm" />
               ))}
-              {/* Skeleton placeholders while loading first page */}
               {loading && animes.length === 0 && Array.from({length:24}).map((_,i) => (
                 <div key={i} className="aspect-[2/3] bg-surface-1 rounded-xl animate-pulse" />
               ))}
             </div>
-            {hasMore && (
+            {hasMore && !loading && (
               <div className="flex justify-center mt-8">
                 <button
                   onClick={() => fetchAnimes(false, page)}
@@ -268,8 +289,13 @@ export default function BrowseClient() {
                 </button>
               </div>
             )}
+            {loading && animes.length > 0 && (
+              <div className="flex justify-center mt-8">
+                <Loader2 size={24} className="animate-spin text-brand" />
+              </div>
+            )}
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
