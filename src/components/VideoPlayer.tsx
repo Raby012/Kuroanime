@@ -68,8 +68,10 @@ export function VideoPlayer({
     setAllSources([]);
     setSourceIndex(0);
 
-    // ── Phase 1: INSTANT — both SUB and DUB sources load immediately ──────
-    // MegaPlay AniList/MAL + VidNest + NHDapi + VidSrc/TMDB embeds
+    // ── Phase 1: INSTANT — SUB + DUB sources load immediately ────────────
+    // getAnilistEmbedSources already returns both sub AND dub for:
+    // MegaPlay (AniList + MAL), VidNest, NHDapi
+    // getEmbedSources adds VidSrc/VidAPI/VidLink/MultiEmbed sub+dub
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
@@ -80,50 +82,53 @@ export function VideoPlayer({
     setAllSources(instant);
     setLoading(false);
 
-    // ── Phase 2: Anikoto resolver — prepends correct /stream/s-2/ URLs ────
-    // These override the AniList/MAL mapping and work for the full library.
-    try {
-      const res = await fetch(`/api/anikoto/${anilistId}`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (res.ok) {
-        const data = await res.json() as {
-          found: boolean;
-          hasDub: boolean;
-          episodes: { number: number; sub: string | null; dub: string | null }[];
-        };
-        if (data.found && data.episodes?.length) {
-          const ep = data.episodes.find((e) => e.number === episode);
-          if (ep) {
-            const anikotoSrcs: StreamSource[] = [];
-            if (ep.sub) anikotoSrcs.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
-            if (ep.dub) anikotoSrcs.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
-            if (anikotoSrcs.length) addUnique(anikotoSrcs, true); // prepend — best sources first
-          }
-        }
-      }
-    } catch (e) {
-      console.error("Anikoto resolver:", e);
-    }
+    // ── Phase 2: Anikoto resolver — prepend correct s-2 URLs (best quality) ──
+    // Runs in background, prepends when ready — doesn't block Phase 1
+    fetch(`/api/anikoto/${anilistId}`, { signal: AbortSignal.timeout(15000) })
+      .then((r) => r.json())
+      .then((data: {
+        found: boolean;
+        episodes: { number: number; sub: string | null; dub: string | null }[];
+      }) => {
+        if (!data.found || !data.episodes?.length) return;
+        const ep = data.episodes.find((e) => e.number === episode);
+        if (!ep) return;
+        const srcs: StreamSource[] = [];
+        if (ep.sub) srcs.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
+        if (ep.dub) srcs.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
+        if (srcs.length) addUnique(srcs, true); // prepend — best source first
+      })
+      .catch(() => {}); // silent fail — Phase 1 sources still work
 
-    // ── Phase 3: async m3u8 + extra TMDB embeds ───────────────────────────
+    // ── Phase 3: async m3u8 streams + TMDB extra dub embeds ──────────────
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
     const asyncFetches: Promise<StreamSource[]>[] = [
-      fetch(`${base}&provider=hianime`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      fetch(`${base}&provider=anikoto`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      fetch(`${base}${seasonQ}&provider=tmdb`).then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
-      fetch(`${base}&provider=gogoanime`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => []),
-      fetch(`${base}&provider=animepahe`).then((r) => r.json()).then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const }))).catch(() => []),
+      // m3u8 real streams
+      fetch(`${base}&provider=hianime`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      fetch(`${base}&provider=anikoto`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
+      fetch(`${base}&provider=gogoanime`)
+        .then((r) => r.json())
+        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
+        .catch(() => []),
+      fetch(`${base}&provider=animepahe`)
+        .then((r) => r.json())
+        .then((d) => ((d.sources ?? []) as StreamSource[]).map((s) => ({ ...s, lang: "sub" as const })))
+        .catch(() => []),
+      // TMDB — adds VidSrc Dub, VidLink Dub, MultiEmbed Dub etc.
+      fetch(`${base}${seasonQ}&provider=tmdb`)
+        .then((r) => r.json()).then((d) => (d.sources ?? []) as StreamSource[]).catch(() => []),
     ];
 
     asyncFetches.forEach((p) => p.then((newSrcs) => {
       if (!newSrcs.length) return;
       const m3u8s  = newSrcs.filter((s) => s.type === "m3u8");
       const embeds = newSrcs.filter((s) => s.type === "embed");
-      if (m3u8s.length)  addUnique(m3u8s, true);
-      if (embeds.length) addUnique(embeds, false);
+      if (m3u8s.length)  addUnique(m3u8s, true);   // prepend m3u8
+      if (embeds.length) addUnique(embeds, false);  // append embeds
     }));
   }, [anilistId, animeTitle, malId, episode, season, seasonYear, imdbId, tmdbId, isMovie, addUnique]);
 
@@ -188,7 +193,7 @@ export function VideoPlayer({
 
   return (
     <div className="w-full">
-      {/* Language tabs — both always visible */}
+      {/* Language tabs */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-1">
         {LANGUAGES.map((l) => {
           const count = langCounts[l.key] || 0;
