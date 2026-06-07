@@ -57,7 +57,6 @@ export default function BrowseClient() {
     setLoading(true);
     setFetchError(false);
 
-    // Build query params for our server-side proxy
     const params = new URLSearchParams();
     params.set("page",    String(currentPage));
     params.set("perPage", "24");
@@ -70,13 +69,12 @@ export default function BrowseClient() {
     if (status)         params.set("status",  status);
 
     try {
-      // Call our own API route — avoids AniList blocking client-side requests
-      const res  = await fetch(`/api/browse?${params.toString()}`);
+      const res = await fetch(`/api/browse?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const json = await res.json();
       if (json.error) throw new Error(json.error);
 
+      // API returns the raw AniList response: { data: { Page: { media, pageInfo } } }
       const media    = (json.data?.Page?.media ?? []) as Anime[];
       const pageInfo = json.data?.Page?.pageInfo;
 
@@ -109,24 +107,23 @@ export default function BrowseClient() {
   function toggleGenre(g: string) {
     setGenres((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
   }
-
   function clearFilters() {
     setGenres([]); setFormat(""); setSeason(""); setYear(""); setStatus(""); setSort("TRENDING_DESC");
   }
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-8">
         <h1 className="font-display text-2xl text-white mb-5">BROWSE ANIME</h1>
 
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input type="text" placeholder="Search anime..." value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full bg-surface-1 border border-white/8 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-brand transition-colors" />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             <div className="relative">
               <select value={sort} onChange={(e) => setSort(e.target.value)}
                 className="appearance-none bg-surface-1 border border-white/8 rounded-xl pl-3 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-brand cursor-pointer">
@@ -141,7 +138,7 @@ export default function BrowseClient() {
                   : "bg-surface-1 text-gray-300 border-white/8 hover:border-brand/50"
               }`}>
               <SlidersHorizontal size={15} />
-              Filters
+              <span className="hidden sm:inline">Filters</span>
               {activeFilters > 0 && (
                 <span className="bg-white/20 text-white text-xs rounded-full px-1.5 py-0.5">{activeFilters}</span>
               )}
@@ -208,7 +205,7 @@ export default function BrowseClient() {
           </div>
         )}
 
-        {fetchError && (
+        {fetchError ? (
           <div className="text-center py-16">
             <p className="text-gray-400 mb-4">Failed to load anime.</p>
             <button onClick={() => fetchAnimes(true, 1)}
@@ -216,15 +213,9 @@ export default function BrowseClient() {
               Try Again
             </button>
           </div>
-        )}
-
-        {!loading && !fetchError && animes.length > 0 && (
-          <p className="text-xs text-gray-600 mb-3">{animes.length} results</p>
-        )}
-
-        {!fetchError && (
+        ) : (
           <>
-            {animes.length === 0 && !loading ? (
+            {!loading && animes.length === 0 ? (
               <div className="text-center py-24 text-gray-600">
                 <Search size={36} className="mx-auto mb-3 opacity-30" />
                 <p>No anime found</p>
@@ -233,12 +224,14 @@ export default function BrowseClient() {
             ) : (
               <>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3">
-                  {animes.map((anime) => (
-                    <AnimeCard key={anime.id} anime={anime as any} size="sm" />
-                  ))}
-                  {loading && animes.length === 0 && Array.from({length:24}).map((_,i) => (
-                    <div key={i} className="aspect-[2/3] bg-surface-1 rounded-xl animate-pulse" />
-                  ))}
+                  {loading && animes.length === 0
+                    ? Array.from({length:24}).map((_,i) => (
+                        <div key={i} className="aspect-[2/3] bg-surface-1 rounded-xl animate-pulse" />
+                      ))
+                    : animes.map((anime) => (
+                        <AnimeCard key={anime.id} anime={anime as any} size="sm" />
+                      ))
+                  }
                 </div>
                 {loading && animes.length > 0 && (
                   <div className="flex justify-center mt-8">
@@ -248,7 +241,7 @@ export default function BrowseClient() {
                 {hasMore && !loading && (
                   <div className="flex justify-center mt-8">
                     <button onClick={() => fetchAnimes(false, page)}
-                      className="flex items-center gap-2 bg-surface-1 hover:bg-surface-2 border border-white/8 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-all">
+                      className="bg-surface-1 hover:bg-surface-2 border border-white/8 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-all">
                       Load More
                     </button>
                   </div>
