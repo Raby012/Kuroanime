@@ -50,8 +50,6 @@ export function VideoPlayer({
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState(false);
   const [providerLabel, setProviderLabel] = useState("");
-  // null = still checking | true = confirmed dub | false = no dub
-  const [hasDub,        setHasDub]        = useState<boolean | null>(null);
 
   const sources = allSources.filter((s) => (s.lang ?? "sub") === language);
 
@@ -69,12 +67,9 @@ export function VideoPlayer({
     setError(false);
     setAllSources([]);
     setSourceIndex(0);
-    setHasDub(null);
 
-    // ── Phase 1: instant SUB sources + optimistic DUB fallbacks ──────────
-    // We show DUB tab immediately with MegaPlay/MAL fallback URLs.
-    // These might show a 404 page for unmapped anime — user sees it and
-    // can switch source manually. Better than hiding DUB completely.
+    // ── Phase 1: INSTANT — both SUB and DUB sources load immediately ──────
+    // MegaPlay AniList/MAL + VidNest + NHDapi + VidSrc/TMDB embeds
     const instant: StreamSource[] = [
       ...getAnilistEmbedSources(anilistId, episode, isMovie, malId),
       ...(malId ? getMalEmbedSources(malId, episode, isMovie) : []),
@@ -84,10 +79,9 @@ export function VideoPlayer({
     ];
     setAllSources(instant);
     setLoading(false);
-    // Show DUB tab immediately — Anikoto resolver will confirm or remove it
-    setHasDub(null);
 
-    // ── Phase 2: Anikoto resolver — replaces fallback URLs with real ones ─
+    // ── Phase 2: Anikoto resolver — prepends correct /stream/s-2/ URLs ────
+    // These override the AniList/MAL mapping and work for the full library.
     try {
       const res = await fetch(`/api/anikoto/${anilistId}`, {
         signal: AbortSignal.timeout(15000),
@@ -98,33 +92,21 @@ export function VideoPlayer({
           hasDub: boolean;
           episodes: { number: number; sub: string | null; dub: string | null }[];
         };
-
         if (data.found && data.episodes?.length) {
           const ep = data.episodes.find((e) => e.number === episode);
           if (ep) {
             const anikotoSrcs: StreamSource[] = [];
             if (ep.sub) anikotoSrcs.push({ type: "embed", url: ep.sub, provider: "Anikoto Sub ✓", lang: "sub" });
             if (ep.dub) anikotoSrcs.push({ type: "embed", url: ep.dub, provider: "Anikoto Dub ✓", lang: "dub" });
-            // Also add VidNest/NHDapi dub if anime has dub
-            if (data.hasDub) {
-              anikotoSrcs.push({ type: "embed", url: `https://vidnest.fun/anime/${anilistId}/${episode}/dub`, provider: "VidNest Dub", lang: "dub" });
-            }
-            if (anikotoSrcs.length) addUnique(anikotoSrcs, true);
+            if (anikotoSrcs.length) addUnique(anikotoSrcs, true); // prepend — best sources first
           }
-          setHasDub(data.hasDub);
-        } else {
-          // Anikoto doesn't have this anime — keep showing DUB tab with
-          // the MAL/AniList fallback sources that are already loaded
-          setHasDub(true); // keep tab visible, let user try
         }
-      } else {
-        setHasDub(true); // resolver failed — keep DUB tab visible
       }
-    } catch {
-      setHasDub(true); // network error — keep DUB tab visible
+    } catch (e) {
+      console.error("Anikoto resolver:", e);
     }
 
-    // ── Phase 3: async m3u8 + extra embeds ───────────────────────────────
+    // ── Phase 3: async m3u8 + extra TMDB embeds ───────────────────────────
     const base    = `/api/stream?title=${encodeURIComponent(animeTitle)}&episode=${episode}`;
     const seasonQ = `&season=${season}${seasonYear ? `&year=${seasonYear}` : ""}`;
 
@@ -199,29 +181,17 @@ export function VideoPlayer({
   const currentSource = sources[sourceIndex];
   const isEmbed       = currentSource?.type === "embed";
 
+  const langCounts = LANGUAGES.reduce((acc, l) => {
+    acc[l.key] = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
+    return acc;
+  }, {} as Record<Language, number>);
+
   return (
     <div className="w-full">
-      {/* Language tabs */}
+      {/* Language tabs — both always visible */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-1">
         {LANGUAGES.map((l) => {
-          const count = allSources.filter((s) => (s.lang ?? "sub") === l.key).length;
-
-          // DUB tab rendering
-          if (l.key === "dub") {
-            // Still loading resolver — show spinner placeholder
-            if (hasDub === null) {
-              return (
-                <div key="dub" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 border bg-surface-1 text-gray-600 border-white/5">
-                  <span>{l.flag}</span>
-                  <span>{l.label}</span>
-                  <Loader2 size={10} className="animate-spin opacity-40" />
-                </div>
-              );
-            }
-            // Confirmed no dub — hide completely
-            if (hasDub === false) return null;
-          }
-
+          const count = langCounts[l.key] || 0;
           return (
             <button
               key={l.key}
