@@ -321,7 +321,12 @@ export async function GET(req: NextRequest) {
       { type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`,                         provider: "VidAPI",       lang: "sub" },
       { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,                               provider: "VidLink",      lang: "sub" },
       { type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`,          provider: "MultiEmbed",   lang: "sub" },
-      { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=en`, provider: "VidSrc Dub", lang: "dub" },
+      // ── DUB sources via TMDB ──────────────────────────────────────────
+      { type: "embed", url: `https://vidsrc-embed.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=en`, provider: "VidSrc Dub",   lang: "dub" },
+      { type: "embed", url: `https://vidsrcme.su/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&ds_lang=en`,     provider: "VidSrc Dub 2", lang: "dub" },
+      { type: "embed", url: `https://vaplayer.ru/embed/tv/${tmdbId}/${season}/${episode}`,                                    provider: "VidAPI Dub",   lang: "dub" },
+      { type: "embed", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?dubbing=true`,                             provider: "VidLink Dub",  lang: "dub" },
+      { type: "embed", url: `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}&lang=en`,             provider: "MultiEmbed Dub", lang: "dub" },
     ];
     return NextResponse.json({ sources, tmdbId });
   }
