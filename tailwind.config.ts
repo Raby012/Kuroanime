@@ -6,20 +6,20 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: "#e11d48",
-          dark: "#9f1239",
-          light: "#fb7185",
+          DEFAULT: "var(--color-brand, #e11d48)",
+          dark:    "var(--color-brand-dark, #9f1239)",
+          light:   "var(--color-brand-light, #fb7185)",
         },
         surface: {
-          DEFAULT: "#0d0d14",
-          1: "#13131e",
-          2: "#1a1a28",
-          3: "#222233",
+          DEFAULT: "var(--color-surface, #0d0d14)",
+          1:       "var(--color-surface-1, #13131e)",
+          2:       "var(--color-surface-2, #1a1a28)",
+          3:       "var(--color-surface-3, #222233)",
         },
       },
       fontFamily: {
         display: ["var(--font-bebas)", "Impact", "sans-serif"],
-        body: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
+        body:    ["var(--font-dm-sans)", "system-ui", "sans-serif"],
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
