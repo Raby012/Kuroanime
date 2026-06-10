@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/components/AuthProvider";
 import { Toaster } from "react-hot-toast";
 import { Analytics } from "@vercel/analytics/next";
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-surface text-white font-body">
         <AuthProvider>
+          <ThemeProvider>
           <Navbar />
           <main>{children}</main>
           <Footer />
@@ -25,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               style: { background: "#1a1a28", color: "#e8e8f0", border: "1px solid rgba(255,255,255,0.07)" },
             }}
           />
+        </ThemeProvider>
         </AuthProvider>
         <Analytics />
       </body>
